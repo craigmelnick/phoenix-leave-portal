@@ -1,0 +1,20 @@
+{
+  "name": "phoenix-leave-portal",
+  "version": "1.0.0",
+  "description": "Phoenix International Logistics — Leave & Attendance Portal (real backend + database)",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "engines": { "node": ">=22.5.0" },
+  "scripts": {
+    "start": "node src/server.js",
+    "seed": "node src/seed.js",
+    "dev": "node src/server.js"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.14"
+  }
+}
