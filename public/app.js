@@ -1,0 +1,655 @@
+/* Phoenix Leave & Attendance Portal — real client, talking to the Express + SQLite API.
+   Same visual design as the earlier prototype; every view now fetches real, persistent data
+   instead of reading from in-memory JS arrays. */
+
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const AVATAR_PALETTE = ['#0d9488','#2563eb','#7c3aed','#db2777','#ea580c','#16a34a','#0891b2'];
+
+let user = null;
+let currentView = 'dashboard';
+let certificateReqId = null;
+let calMode = 'year';
+let calMonthIdx = new Date().getMonth();
+let calYear = new Date().getFullYear();
+let pendingEmail = null;
+let devOtp = null;
+
+/* ---------------- API helper ---------------- */
+
+async function api(path, options = {}) {
+  const res = await fetch('/api' + path, {
+    method: options.method || 'GET',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+  let data = null;
+  try { data = await res.json(); } catch (e) { /* no body */ }
+  if (!res.ok) {
+    const err = new Error((data && data.error) || 'Something went wrong.');
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+/* ---------------- Helpers ---------------- */
+
+function fmtDate(iso) {
+  return new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+}
+function avatarColorFor(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
+}
+function avatarHtml(name) {
+  const initials = name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase();
+  return `<span class="avatar" style="background:${avatarColorFor(name)}">${initials}</span>`;
+}
+function statusLabel(s) {
+  return { pending_1: 'Pending 1st approval', pending_2: 'Pending 2nd approval', approved: 'Approved', rejected: 'Rejected' }[s] || s;
+}
+
+/* ---------------- Login / OTP ---------------- */
+
+function renderLogin() {
+  document.getElementById('loginScreen').style.display = 'flex';
+  let html = `<div class="login-card">
+    <span class="login-mark"><img src="/assets/logo-icon.jpg" alt=""></span>
+    <h2>Phoenix Leave Portal</h2>`;
+  if (!pendingEmail) {
+    html += `<p>Sign in to manage your leave.</p>
+      <div class="login-field"><label>Company email</label>
+        <input id="loginEmail" type="email" placeholder="you@phoenixintl.co.za">
+      </div>
+      <div class="otp-demo-note">We'll email you a one-time code — it's free to send and everyone already has a company inbox, so there's nothing to install and no per-message cost.</div>
+      <div id="loginError" style="color:var(--red);font-size:12.5px;margin-bottom:6px;min-height:16px;"></div>
+      <button class="btn full" onclick="requestOtp()">Email me a code</button>`;
+  } else {
+    html += `<p>Enter the 4-digit code sent to<br><b>${pendingEmail}</b>.</p>`;
+    if (devOtp) {
+      html += `<div class="otp-demo-note">Dev mode: SMTP isn't configured on this server yet, so no real email was sent. Your code is <b>${devOtp}</b> — set SMTP_HOST etc. in .env to send real emails.</div>`;
+    }
+    html += `<div class="login-field"><input id="otpInput" class="otp-input" maxlength="4" inputmode="numeric" placeholder="••••"></div>
+      <div id="otpError" style="color:var(--red);font-size:12.5px;margin-bottom:6px;min-height:16px;"></div>
+      <button class="btn full" style="margin-bottom:8px;" onclick="verifyOtp()">Verify &amp; sign in</button>
+      <button class="btn secondary full" onclick="backToStep1()">‹ Back</button>`;
+  }
+  html += `</div>`;
+  document.getElementById('loginScreen').innerHTML = html;
+}
+
+async function requestOtp() {
+  const email = document.getElementById('loginEmail').value.trim();
+  if (!email) { document.getElementById('loginError').textContent = 'Please enter your email address.'; return; }
+  try {
+    const result = await api('/auth/request-otp', { method: 'POST', body: { email } });
+    pendingEmail = email;
+    devOtp = result.devCode || null;
+    renderLogin();
+  } catch (e) {
+    document.getElementById('loginError').textContent = e.message;
+  }
+}
+
+async function verifyOtp() {
+  const code = document.getElementById('otpInput').value.trim();
+  try {
+    const result = await api('/auth/verify-otp', { method: 'POST', body: { email: pendingEmail, code } });
+    user = result.user;
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    currentView = 'dashboard';
+    render();
+  } catch (e) {
+    document.getElementById('otpError').textContent = e.message;
+  }
+}
+
+function backToStep1() { pendingEmail = null; devOtp = null; renderLogin(); }
+
+async function logout() {
+  if (!confirm('Log out?')) return;
+  await api('/auth/logout', { method: 'POST' });
+  user = null;
+  pendingEmail = null;
+  document.getElementById('app').style.display = 'none';
+  renderLogin();
+}
+
+/* ---------------- Nav ---------------- */
+
+function navItemsFor(u) {
+  const items = [
+    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'request', label: 'Request leave' },
+    { id: 'myrequests', label: 'My requests' },
+  ];
+  if (u.isApprover) items.push({ id: 'approvals', label: 'Approvals' });
+  items.push({ id: 'teamcal', label: 'Team calendar' });
+  items.push({ id: 'notifications', label: 'Notifications' });
+  items.push({ id: 'admin', label: 'Admin settings' });
+  items.push({ id: 'ideas', label: 'Platform ideas' });
+  return items;
+}
+
+function renderNav() {
+  const nav = document.getElementById('nav');
+  nav.innerHTML = '';
+  navItemsFor(user).forEach((item) => {
+    const el = document.createElement('div');
+    el.className = 'nav-item' + (currentView === item.id ? ' active' : '');
+    el.innerHTML = `<span class="icon-circle"><img src="/assets/logo-icon.jpg" alt=""></span>${item.label}`;
+    el.onclick = () => { currentView = item.id; render(); };
+    nav.appendChild(el);
+  });
+}
+
+function renderBottomNav() {
+  const bar = document.getElementById('bottomNav');
+  bar.innerHTML = '';
+  navItemsFor(user).forEach((item) => {
+    const el = document.createElement('div');
+    el.className = 'bottom-nav-item' + (currentView === item.id ? ' active' : '');
+    el.innerHTML = `<span class="icon-circle"><img src="/assets/logo-icon.jpg" alt=""></span>${item.label}`;
+    el.onclick = () => { currentView = item.id; render(); };
+    bar.appendChild(el);
+  });
+}
+
+function renderTopbarMeta() {
+  const dateEl = document.getElementById('topbarDate');
+  dateEl.textContent = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }).toUpperCase();
+  const avatar = document.getElementById('accountAvatar');
+  const initials = user.name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase();
+  avatar.textContent = initials;
+  avatar.style.background = avatarColorFor(user.name);
+  avatar.title = user.name + ' — log out';
+}
+
+async function renderBell() {
+  try {
+    const { count } = await api('/notifications/unread-count');
+    const badge = document.getElementById('bellBadge');
+    if (count > 0) { badge.style.display = 'inline-block'; badge.textContent = count; }
+    else { badge.style.display = 'none'; }
+  } catch (e) { /* ignore */ }
+  document.getElementById('bellBtn').onclick = () => { currentView = 'notifications'; render(); };
+}
+
+/* ---------------- Views ---------------- */
+
+function balanceCard(label, icon, color, ent, used, pending, available) {
+  const usedPct = ent > 0 ? Math.min(100, (used / ent) * 100) : 0;
+  return `<div class="balance-card">
+    <div class="balance-top"><span class="balance-label">${label}</span><span class="balance-icon" style="background:${color}22;color:${color}">${icon}</span></div>
+    <div class="balance-num">${available}</div>
+    <div class="balance-sub">days available</div>
+    <div class="balance-bar"><div class="balance-bar-fill" style="width:${usedPct}%;background:${color}"></div></div>
+    <div class="balance-foot"><span>${used} used</span><span>${pending} pending</span></div>
+  </div>`;
+}
+
+async function viewDashboard() {
+  const d = await api('/dashboard');
+  let html = `<div class="hero">
+    <p class="hero-eyebrow">Phoenix International Logistics</p>
+    <h2>Welcome, ${d.firstName}</h2>
+    <p>${d.heroLine}</p>
+    <button class="hero-btn" onclick="currentView='request'; render();">Request leave &nbsp;+</button>
+  </div>`;
+
+  html += `<div class="balance-grid">`;
+  html += balanceCard('Annual leave', '☀️', '#0090bd', d.balances.annual.entitlement, d.balances.annual.used, d.balances.annual.pending, d.balances.annual.available);
+  html += balanceCard('Sick leave', '✚', '#dc2626', d.balances.sick.entitlement, d.balances.sick.used, d.balances.sick.pending, d.balances.sick.available);
+  html += balanceCard('Family responsibility', '♥', '#d97706', d.balances.family.entitlement, d.balances.family.used, d.balances.family.pending, d.balances.family.available);
+  html += `</div>`;
+
+  html += `<div class="info-box">Leave year: <b>${fmtDate(d.leaveYear.start)} – ${fmtDate(d.leaveYear.end)}</b>. Unused days do not carry over — any balance left on ${fmtDate(d.leaveYear.end)} is forfeited.</div>`;
+
+  if (d.yearEndReminder) {
+    html += `<div class="warn-box">⏰ Year-end reminder: you still have ${d.yearEndReminder} day(s) of annual leave unused, and it will be forfeited on ${fmtDate(d.leaveYear.end)}. Book it before then.</div>`;
+  }
+
+  html += `<div class="panel"><h2>Noticeboard</h2><p style="font-size:13.5px;color:var(--ink);margin:0;">${d.noticeboard}</p>`;
+  if (user.role === 'director') {
+    html += `<div style="margin-top:12px;">
+      <textarea id="noticeboardInput" rows="2" style="width:100%;">${d.noticeboard}</textarea>
+      <button class="btn secondary small" style="margin-top:8px;" onclick="saveNoticeboard()">Update noticeboard</button>
+    </div>`;
+  }
+  html += `</div>`;
+
+  html += `<div class="panel"><h2>Upcoming approved leave</h2>`;
+  if (d.upcoming.length === 0) { html += `<div class="empty">No upcoming approved leave booked yet.</div>`; }
+  else {
+    html += `<div class="table-scroll"><table><tr><th>Type</th><th>From</th><th>To</th><th>Days</th></tr>`;
+    d.upcoming.forEach((r) => html += `<tr><td>${r.type}</td><td>${fmtDate(r.start)}</td><td>${fmtDate(r.end)}</td><td>${r.days}</td></tr>`);
+    html += `</table></div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+async function saveNoticeboard() {
+  const message = document.getElementById('noticeboardInput').value;
+  await api('/noticeboard', { method: 'POST', body: { message } });
+  render();
+}
+
+function buildDaySelect(id, sel) {
+  let opts = '';
+  for (let d = 1; d <= 31; d++) { const v = String(d).padStart(2, '0'); opts += `<option value="${v}" ${v === sel ? 'selected' : ''}>${d}</option>`; }
+  return `<select id="${id}" style="flex:1;">${opts}</select>`;
+}
+function buildMonthSelect(id, sel) {
+  let opts = '';
+  MONTH_NAMES.forEach((m, i) => { const v = String(i + 1).padStart(2, '0'); opts += `<option value="${v}" ${v === sel ? 'selected' : ''}>${m}</option>`; });
+  return `<select id="${id}" style="flex:2;">${opts}</select>`;
+}
+function buildYearSelect(id, sel) {
+  let opts = '';
+  const y0 = new Date().getFullYear();
+  [y0 - 1, y0, y0 + 1, y0 + 2].forEach((y) => { opts += `<option value="${y}" ${String(y) === sel ? 'selected' : ''}>${y}</option>`; });
+  return `<select id="${id}" style="flex:1;">${opts}</select>`;
+}
+
+function viewRequest() {
+  const today = new Date();
+  const dd = String(today.getDate()).padStart(2, '0');
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const yy = String(today.getFullYear());
+  return `<div class="panel"><h2>Request leave <span class="hint">Business days only — weekends &amp; public holidays are excluded automatically</span></h2>
+    <div class="form-grid">
+      <div class="form-field"><label>Leave type</label>
+        <select id="reqType"><option>Annual</option><option>Sick</option><option>Family Responsibility</option><option>Study Leave</option><option>Maternity</option><option>Paternity</option><option>Unpaid</option></select>
+      </div>
+      <div class="form-field"><label>Available balance</label>
+        <input id="reqAvailable" value="…" disabled>
+      </div>
+      <div class="form-field"><label>Start date <span class="hint">day / month / year</span></label>
+        <div style="display:flex;gap:6px;">${buildDaySelect('reqStartDay', dd)}${buildMonthSelect('reqStartMonth', mm)}${buildYearSelect('reqStartYear', yy)}</div>
+      </div>
+      <div class="form-field"><label>End date <span class="hint">day / month / year</span></label>
+        <div style="display:flex;gap:6px;">${buildDaySelect('reqEndDay', dd)}${buildMonthSelect('reqEndMonth', mm)}${buildYearSelect('reqEndYear', yy)}</div>
+      </div>
+      <div class="form-field full"><label>Reason (optional)</label><textarea id="reqReason" rows="2" placeholder="e.g. family trip, medical appointment..."></textarea></div>
+      <div class="form-field full" id="docField" style="display:none;">
+        <label>Supporting document <span class="hint">e.g. a doctor's/sick note — optional, stored with the request</span></label>
+        <input type="file" id="reqDoc">
+      </div>
+    </div>
+    <div id="reqPreview" style="margin-top:14px;"></div>
+    <div style="margin-top:14px;">
+      <button class="btn" id="submitBtn" onclick="submitLeaveRequest()">Submit for approval</button>
+    </div>
+  </div>`;
+}
+
+function toggleDocField() {
+  const type = document.getElementById('reqType').value;
+  const needsDoc = ['Sick', 'Maternity', 'Paternity', 'Study Leave'].includes(type);
+  document.getElementById('docField').style.display = needsDoc ? 'block' : 'none';
+}
+
+function readRequestDates() {
+  const start = `${document.getElementById('reqStartYear').value}-${document.getElementById('reqStartMonth').value}-${document.getElementById('reqStartDay').value}`;
+  const end = `${document.getElementById('reqEndYear').value}-${document.getElementById('reqEndMonth').value}-${document.getElementById('reqEndDay').value}`;
+  return { start, end };
+}
+
+async function updateRequestPreview() {
+  const { start, end } = readRequestDates();
+  const box = document.getElementById('reqPreview');
+  const submitBtn = document.getElementById('submitBtn');
+  const availableInput = document.getElementById('reqAvailable');
+  try {
+    const p = new URLSearchParams({ start, end });
+    const preview = await api('/leave-requests/preview?' + p.toString());
+    if (availableInput) availableInput.value = preview.available + ' days';
+    if (!preview.valid) {
+      box.innerHTML = `<div class="warn-box">⚠️ ${preview.message}</div>`;
+      if (submitBtn) submitBtn.disabled = true;
+      return;
+    }
+    let html = `<div class="info-box">This request is for <b>${preview.days} business day(s)</b>, ${fmtDate(start)} – ${fmtDate(end)}. Approval route: <b>${preview.flow}</b>.</div>`;
+    if (preview.exceedsBalance) {
+      html += `<div class="warn-box">⚠️ This exceeds your available balance of ${preview.available} day(s).</div>`;
+    }
+    if (preview.blocked) {
+      html += `<div class="warn-box">🚫 Not permitted — only one person per department may be on leave at a time. ${preview.overlapNames.join(', ')} already ${preview.overlapNames.length > 1 ? 'have' : 'has'} approved or pending leave during this period. Please choose different dates.</div>`;
+    }
+    box.innerHTML = html;
+    if (submitBtn) submitBtn.disabled = preview.blocked;
+  } catch (e) {
+    box.innerHTML = `<div class="warn-box">⚠️ ${e.message}</div>`;
+  }
+}
+
+async function submitLeaveRequest() {
+  const type = document.getElementById('reqType').value;
+  const { start, end } = readRequestDates();
+  const reason = document.getElementById('reqReason').value;
+  try {
+    const result = await api('/leave-requests', { method: 'POST', body: { type, start, end, reason } });
+    alert(`Request submitted: ${result.days} day(s) of ${type} leave, ${fmtDate(start)} – ${fmtDate(end)}. Status: ${statusLabel(result.status)}.`);
+    currentView = 'myrequests';
+    render();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function viewMyRequests() {
+  const { requests } = await api('/leave-requests/mine');
+  let html = `<div class="panel"><h2>My requests</h2>`;
+  if (requests.length === 0) { html += `<div class="empty">No leave requests yet.</div>`; }
+  else {
+    html += `<div class="table-scroll"><table><tr><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Status</th><th>Notes</th><th>Audit trail</th><th></th></tr>`;
+    requests.forEach((r) => {
+      const trailText = r.trail.length ? r.trail.join('<br>') : '—';
+      const docText = r.doc ? `<br><span style="color:var(--muted);">📎 ${r.doc}</span>` : '';
+      const certBtn = r.status === 'approved' ? `<button class="btn small secondary" onclick="openCertificate(${r.id})">Certificate</button>` : '';
+      html += `<tr><td>${r.type}</td><td>${fmtDate(r.start)}</td><td>${fmtDate(r.end)}</td><td>${r.days}</td>
+        <td><span class="pill ${r.status}">${r.statusLabel}</span></td><td style="color:var(--muted)">${r.reason || '—'}${docText}</td>
+        <td style="font-size:11.5px;color:var(--muted);">${trailText}</td><td style="white-space:nowrap;">${certBtn}</td></tr>`;
+    });
+    html += `</table></div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+async function viewApprovals() {
+  const { pending } = await api('/approvals/pending');
+  let html = `<div class="panel"><h2>Awaiting your approval <span class="hint">Requests where you're assigned as an approver</span></h2>`;
+  if (pending.length === 0) { html += `<div class="empty">Nothing waiting on you right now.</div>`; }
+  else {
+    html += `<div class="table-scroll"><table><tr><th>Employee</th><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th></th></tr>`;
+    pending.forEach((r) => {
+      html += `<tr><td>${avatarHtml(r.employeeName)}${r.employeeName}</td><td>${r.type}</td><td>${fmtDate(r.start)}</td><td>${fmtDate(r.end)}</td><td>${r.days}</td><td style="color:var(--muted)">${r.reason || '—'}</td>
+        <td style="white-space:nowrap;">
+          <button class="btn small" onclick="actOnRequest(${r.id},'approve')">Approve</button>
+          <button class="btn small danger" onclick="actOnRequest(${r.id},'reject')">Reject</button>
+        </td></tr>`;
+    });
+    html += `</table></div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+async function actOnRequest(id, action) {
+  try {
+    const result = await api(`/leave-requests/${id}/${action}`, { method: 'POST' });
+    alert(action === 'reject' ? 'Declined. A notification has been sent.' : `Approved (now: ${statusLabel(result.status)}). Notifications have been sent.`);
+    render();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function monthGrid(year, month, monthData, compact) {
+  const first = new Date(year, month, 1);
+  const startOffset = (first.getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < startOffset; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  const dayNames = compact ? ['M', 'T', 'W', 'T', 'F', 'S', 'S'] : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  let html = `<div class="cal-grid ${compact ? 'compact' : ''}">`;
+  dayNames.forEach((dn) => html += `<div class="cal-head ${compact ? 'compact' : ''}">${dn}</div>`);
+  cells.forEach((d) => {
+    if (d === null) { html += `<div class="cal-cell ${compact ? 'compact' : ''}" style="background:#f8fafc;"></div>`; return; }
+    const info = (monthData && monthData.days && monthData.days[d]) || { isWeekend: false, isHoliday: false, entries: [] };
+    html += `<div class="cal-cell ${compact ? 'compact' : ''} ${info.isWeekend ? 'weekend' : ''} ${info.isHoliday ? 'holiday' : ''}"><div class="daynum">${d}${(info.isHoliday && !compact) ? ' 🎌' : ''}</div>`;
+    const typeColor = { Annual: '#0090bd', Sick: '#dc2626', Unpaid: '#64748b', 'Family Responsibility': '#d97706', 'Study Leave': '#7c3aed', Maternity: '#db2777', Paternity: '#16a34a' };
+    if (compact) {
+      html += `<div class="dot-wrap">`;
+      info.entries.slice(0, 6).forEach((e) => {
+        const color = e.status === 'approved' ? typeColor[e.type] : '#94a3b8';
+        html += `<span class="dot-tag" style="background:${color}" title="${e.employeeName} — ${e.statusLabel}"></span>`;
+      });
+      html += `</div>`;
+    } else {
+      info.entries.slice(0, 3).forEach((e) => {
+        const color = e.status === 'approved' ? typeColor[e.type] : '#94a3b8';
+        html += `<span class="tag" style="background:${color}" title="${e.employeeName} — ${e.statusLabel}">${e.employeeName.split(' ')[0]}</span>`;
+      });
+      if (info.entries.length > 3) html += `<span class="tag" style="background:#334155;">+${info.entries.length - 3} more</span>`;
+    }
+    html += `</div>`;
+  });
+  html += `</div>`;
+  return html;
+}
+
+async function viewTeamCal() {
+  let html = `<div class="panel"><h2>Team calendar <span class="hint" id="calScopeLabel"></span></h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+      <div class="cal-toggle">
+        <button class="btn secondary small ${calMode === 'year' ? 'active' : ''}" onclick="setCalMode('year')">12-month view</button>
+        <button class="btn secondary small ${calMode === 'month' ? 'active' : ''}" onclick="setCalMode('month')">1-month view</button>
+      </div>`;
+  if (calMode === 'month') {
+    html += `<div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn secondary small" onclick="shiftCalMonth(-1)">‹ Prev</button>
+        <b>${MONTH_NAMES[calMonthIdx]} ${calYear}</b>
+        <button class="btn secondary small" onclick="shiftCalMonth(1)">Next ›</button>
+      </div>`;
+  }
+  html += `</div><div id="calBody">Loading…</div></div>`;
+  setTimeout(loadCalendarBody, 0);
+  return html;
+}
+
+async function loadCalendarBody() {
+  const body = document.getElementById('calBody');
+  if (!body) return;
+  if (calMode === 'month') {
+    const data = await api(`/calendar/month?year=${calYear}&month=${calMonthIdx}`);
+    document.getElementById('calScopeLabel').textContent = data.scope;
+    body.innerHTML = monthGrid(calYear, calMonthIdx, data, false);
+  } else {
+    let y = 2026, m = 2; // leave year starts March 2026, matching the company's leave-year convention
+    let html = `<div class="year-grid">`;
+    const months = [];
+    for (let i = 0; i < 12; i++) { months.push({ y, m }); m++; if (m > 11) { m = 0; y++; } }
+    const results = await Promise.all(months.map((mm) => api(`/calendar/month?year=${mm.y}&month=${mm.m}`)));
+    document.getElementById('calScopeLabel').textContent = results[0] ? results[0].scope : '';
+    months.forEach((mm, i) => {
+      html += `<div class="month-block"><h4>${MONTH_NAMES[mm.m]} ${mm.y}</h4>${monthGrid(mm.y, mm.m, results[i], true)}</div>`;
+    });
+    html += `</div>`;
+    body.innerHTML = html;
+  }
+}
+
+function setCalMode(mode) { calMode = mode; render(); }
+function shiftCalMonth(delta) {
+  calMonthIdx += delta;
+  if (calMonthIdx > 11) { calMonthIdx = 0; calYear++; }
+  if (calMonthIdx < 0) { calMonthIdx = 11; calYear--; }
+  render();
+}
+
+async function viewNotifications() {
+  const { notifications } = await api('/notifications');
+  let html = `<div class="panel"><h2>Notifications <span class="hint">Read-only — informational, no action required</span></h2>`;
+  if (notifications.length === 0) { html += `<div class="empty">No notifications yet.</div>`; }
+  else { notifications.forEach((n) => html += `<div class="notif-item"><div class="notif-dot"></div><div>${n.text}</div></div>`); }
+  html += `</div>`;
+  return html;
+}
+
+function approverOptions(options, excludeId, selected) {
+  let opts = `<option value="" ${!selected ? 'selected' : ''}>— None (defaults to CEO) —</option>`;
+  options.filter((u) => u.id !== excludeId).forEach((u) => {
+    opts += `<option value="${u.id}" ${u.id === selected ? 'selected' : ''}>${u.name}</option>`;
+  });
+  return opts;
+}
+
+async function viewAdmin() {
+  let html = '';
+
+  if (user.role === 'director') {
+    const { options, employees } = await api('/admin/approvers');
+    html += `<div class="panel"><h2>Approver assignments <span class="hint">Only you can set this — who signs off each person's leave</span></h2>
+      <p style="font-size:12.5px;color:var(--muted);margin:-4px 0 8px;">Approver 1 must sign off first. Approver 2 (and optional Approver 3, for extra cover if one is off) sign off second — either is enough. Leave Approver 2 blank to send the second step straight to you.</p>
+      <div class="table-scroll"><table><tr><th>Employee</th><th>Approver 1</th><th>Approver 2</th><th>Approver 3 (backup)</th><th></th></tr>`;
+    employees.forEach((e) => {
+      html += `<tr>
+        <td>${avatarHtml(e.name)}${e.name}</td>
+        <td><select id="app1_${e.id}">${approverOptions(options, e.id, e.approver1)}</select></td>
+        <td><select id="app2_${e.id}">${approverOptions(options, e.id, e.approver2)}</select></td>
+        <td><select id="app3_${e.id}">${approverOptions(options, e.id, e.approver3)}</select></td>
+        <td><button class="btn small" onclick="saveApprovers('${e.id}')">Save</button></td>
+      </tr>`;
+    });
+    html += `</table></div></div>`;
+  } else {
+    html += `<div class="info-box">Only the CEO can view or change who approves each person's leave.</div>`;
+  }
+
+  const report = await api('/admin/report');
+  html += `<div class="cards-row">
+    <div class="card"><h3>Open requests</h3><div class="big">${report.pendingCount}</div><div class="sub">across all departments</div></div>
+    <div class="card"><h3>Approved days (YTD)</h3><div class="big">${report.approvedDays}</div><div class="sub">this leave year</div></div>
+    <div class="card"><h3>Headcount</h3><div class="big">${report.headcount}</div><div class="sub">across ${report.departmentCount} departments</div></div>
+  </div>`;
+
+  html += `<div class="panel"><h2>Approved days by department</h2><div class="table-scroll"><table><tr><th>Department</th><th>Headcount</th><th>Approved days (YTD)</th><th>Open requests</th></tr>`;
+  report.departments.forEach((d) => {
+    html += `<tr><td><b>${d.name}</b></td><td>${d.headcount}</td><td>${d.approvedDays}</td><td>${d.openRequests}</td></tr>`;
+  });
+  html += `</table></div></div>`;
+
+  if (user.role === 'director') {
+    const { employees } = await api('/admin/entitlements');
+    html += `<div class="panel"><h2>Employee entitlements <span class="hint">Visible to the CEO only — individual balances aren't shown to department managers, to avoid tenure-based conflicts of interest</span></h2><div class="table-scroll"><table><tr><th>Employee</th><th>Department</th><th>Entitlement</th><th>Used</th><th>Pending</th><th>Remaining</th></tr>`;
+    employees.forEach((e) => {
+      html += `<tr><td>${avatarHtml(e.name)}${e.name}</td><td>${e.department}</td><td>${e.entitlement}</td><td>${e.used}</td><td>${e.pending}</td><td><b style="color:var(--teal-dark)">${e.remaining}</b></td></tr>`;
+    });
+    html += `</table></div></div>`;
+  } else {
+    html += `<div class="info-box">Individual leave balances are only visible to the CEO and to each employee for their own account — this keeps how much leave a colleague has earned private.</div>`;
+  }
+  return html;
+}
+
+async function saveApprovers(userId) {
+  const approver1 = document.getElementById('app1_' + userId).value || null;
+  const approver2 = document.getElementById('app2_' + userId).value || null;
+  const approver3 = document.getElementById('app3_' + userId).value || null;
+  await api(`/admin/approvers/${userId}`, { method: 'POST', body: { approver1, approver2, approver3 } });
+  alert('Approvers updated.');
+  render();
+}
+
+function openCertificate(id) { certificateReqId = id; currentView = 'certificate'; render(); }
+
+async function viewCertificate() {
+  try {
+    const c = await api(`/leave-requests/${certificateReqId}/certificate`);
+    return `
+      <div class="no-print" style="margin-bottom:14px;">
+        <button class="btn secondary" onclick="currentView='myrequests'; render();">‹ Back to My requests</button>
+        <button class="btn" onclick="window.print()" style="margin-left:8px;">🖨️ Print / Save as PDF</button>
+      </div>
+      <div class="certificate">
+        <div class="cert-header">
+          <img src="/assets/logo-icon.jpg" alt="" class="cert-logo">
+          <div>
+            <div class="cert-company">Phoenix International Logistics</div>
+            <div class="cert-sub">Certificate of Approved Leave</div>
+          </div>
+        </div>
+        <div class="cert-ref">Reference: ${c.refNo} &nbsp;•&nbsp; Issued: ${c.issuedDate}</div>
+        <table class="cert-table">
+          <tr><td>Employee</td><td><b>${c.employeeName}</b></td></tr>
+          <tr><td>Department</td><td>${c.department}</td></tr>
+          <tr><td>Leave type</td><td>${c.type}</td></tr>
+          <tr><td>Dates</td><td><b>${c.dateRange}</b></td></tr>
+          <tr><td>Business days</td><td>${c.days}</td></tr>
+          <tr><td>Approved by</td><td>${c.approvedBy}</td></tr>
+          <tr><td>Remaining balance after this leave</td><td><b>${c.remainingBalance} day(s)</b> of ${c.entitlement} entitlement, this leave year</td></tr>
+        </table>
+        <p class="cert-footnote">This certificate confirms the leave above has been approved in the Phoenix Leave &amp; Attendance Portal. Leave year runs ${fmtDate(c.leaveYear.start)} – ${fmtDate(c.leaveYear.end)}; unused days do not carry over.</p>
+      </div>`;
+  } catch (e) {
+    return `<div class="panel"><div class="empty">${e.message}</div>
+      <button class="btn secondary" onclick="currentView='myrequests'; render();">‹ Back to My requests</button></div>`;
+  }
+}
+
+function viewIdeas() {
+  return `<div class="panel"><h2>Feature ideas from other leave platforms <span class="hint">researched from BambooHR, Personio, Deputy, Factorial, AttendanceBot</span></h2>
+    <ul class="feature-list">
+      <li><b>Team availability / conflict warnings</b> — flags when teammates in the same department are already off during the requested dates.</li>
+      <li><b>Per-person approver assignment</b> — the CEO personally assigns up to three approvers for each employee.</li>
+      <li><b>Self-service balance &amp; history</b> — staff see entitlement, used, pending and remaining without asking HR.</li>
+      <li><b>Public holiday awareness</b> — requests auto-exclude weekends and public holidays from the day count.</li>
+      <li><b>Multiple leave types</b> — Annual, Sick, Family Responsibility, Study Leave, Maternity, Paternity, Unpaid, with a document upload for sick leave.</li>
+      <li><b>Email notifications</b> — approvers and the CEO get an email the moment a request needs them or gets decided.</li>
+      <li><b>Audit trail</b> — every approval step is timestamped and attributed; visible per request on My Requests.</li>
+      <li><b>Manager &amp; company-wide reporting</b> — approved days and open requests by department, without exposing individual balances.</li>
+      <li><b>Automatic year-end reminders</b> — a banner nudges staff every January/February who still have unused balance before it's forfeited.</li>
+      <li><b>Private balances</b> — only the CEO and the employee themselves can see that employee's exact leave balance.</li>
+      <li><b>Printable leave certificate</b> — a digital, downloadable confirmation of approved leave with remaining balance.</li>
+      <li><b>Real, persistent database</b> — every request, approval and notification is stored permanently, surviving restarts and giving a genuine audit record.</li>
+    </ul>
+  </div>`;
+}
+
+/* ---------------- Render ---------------- */
+
+const titles = { dashboard: 'Dashboard', request: 'Request leave', myrequests: 'My requests', approvals: 'Approvals', teamcal: 'Team calendar', notifications: 'Notifications', admin: 'Admin settings', ideas: 'Platform ideas', certificate: 'Leave certificate' };
+
+async function render() {
+  renderNav();
+  renderBottomNav();
+  renderBell();
+  renderTopbarMeta();
+  document.getElementById('pageTitle').textContent = titles[currentView] || 'Dashboard';
+  const content = document.getElementById('content');
+  content.innerHTML = '<div class="empty">Loading…</div>';
+  let html = '';
+  try {
+    if (currentView === 'dashboard') html = await viewDashboard();
+    else if (currentView === 'request') html = viewRequest();
+    else if (currentView === 'myrequests') html = await viewMyRequests();
+    else if (currentView === 'approvals') html = await viewApprovals();
+    else if (currentView === 'teamcal') html = await viewTeamCal();
+    else if (currentView === 'notifications') html = await viewNotifications();
+    else if (currentView === 'admin') html = await viewAdmin();
+    else if (currentView === 'ideas') html = viewIdeas();
+    else if (currentView === 'certificate') html = await viewCertificate();
+  } catch (e) {
+    html = `<div class="panel"><div class="empty">${e.message}</div></div>`;
+  }
+  content.innerHTML = html;
+
+  if (currentView === 'request') {
+    ['reqStartDay', 'reqStartMonth', 'reqStartYear', 'reqEndDay', 'reqEndMonth', 'reqEndYear'].forEach((id) => {
+      document.getElementById(id).addEventListener('change', updateRequestPreview);
+    });
+    document.getElementById('reqType').addEventListener('change', () => { toggleDocField(); updateRequestPreview(); });
+    updateRequestPreview();
+  }
+}
+
+/* ---------------- Boot ---------------- */
+
+(async function boot() {
+  try {
+    const result = await api('/auth/me');
+    user = result.user;
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    render();
+  } catch (e) {
+    renderLogin();
+  }
+})();
