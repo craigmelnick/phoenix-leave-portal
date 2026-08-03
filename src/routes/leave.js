@@ -7,6 +7,9 @@ const {
   businessDaysBetween,
   remainingDays,
   accruedDays,
+    isBeyondAdvanceWindow,
+    remainingDaysAsOf,
+    advanceDaysTaken,
   stage2Pool,
   isAwaitingApproval,
   overlappingColleagues,
@@ -67,7 +70,7 @@ router.get('/dashboard', (req, res) => {
     firstName: user.name.split(' ')[0],
     heroLine,
     balances: {
-      annual: { label: 'Annual leave', entitlement: user.entitlement, accrued: accruedDays(user), used: user.used, pending: user.pending, available: remainingDays(user) },
+            annual: { label: 'Annual leave', entitlement: user.entitlement, accrued: accruedDays(user), used: user.used, pending: user.pending, available: remainingDays(user), advanceTaken: advanceDaysTaken(user) },
       sick: { label: 'Sick leave', entitlement: 10, used: sick.used, pending: sick.pending, available: Math.max(0, 10 - sick.used - sick.pending) },
       family: { label: 'Family responsibility', entitlement: 3, used: fam.used, pending: fam.pending, available: Math.max(0, 3 - fam.used - fam.pending) },
     },
@@ -121,13 +124,20 @@ router.get('/leave-requests/preview', (req, res) => {
         .join(' or ')} → CEO notified`
     : 'Self-approved (CEO)';
   const overlapNames = overlap.map((r) => allUsers.find((u) => u.id === r.employee_id).name);
+
+    // Leave starting more than 6 months from now needs the CEO to approve an escalation first —
+    // the normal accrual projection below doesn't apply until that's granted.
+    const beyondWindow = isBeyondAdvanceWindow(start);
+    const available = beyondWindow ? remainingDays(user) : remainingDaysAsOf(user, start);
+    const accrued = beyondWindow ? accruedDays(user) : accruedDays(user, start);
   res.json({
     valid: true,
     days,
     flow,
-    exceedsBalance: days > remainingDays(user),
-    available: remainingDays(user),
-    accrued: accruedDays(user),
+    needsEscalation: beyondWindow,
+        exceedsBalance: !beyondWindow && days > available,
+        available,
+        accrued,
         entitlement: user.entitlement,
     blocked: overlap.length > 0,
     overlapNames,
@@ -136,7 +146,7 @@ router.get('/leave-requests/preview', (req, res) => {
 
 router.post('/leave-requests', (req, res) => {
   const user = req.user;
-  const { type, start, end, reason } = req.body;
+    const { type, start, end, reason, escalationId } = req.body;
   if (!isValidCalendarDate(start) || !isValidCalendarDate(end) || end < start) {
     return res.status(400).json({ error: "Please choose a valid start and end date (end date can't be before the start date)." });
   }
@@ -153,23 +163,46 @@ router.post('/leave-requests', (req, res) => {
   }
 
   const days = businessDaysBetween(start, end);
-  // Hard block: annual leave can't be booked beyond what's actually been accrued so far this
-    // leave year (earned monthly in arrears) — enforced here, not just as a warning in the preview,
-    // so it can't be bypassed.
-    if (type === 'Annual' && days > remainingDays(user)) {
+   // Leave starting more than 6 months from now needs a CEO-approved escalation first — the
+    // employee can't just submit it through the normal flow.
+    let usedEscalation = null;
+    if (isBeyondAdvanceWindow(start)) {
+          if (!escalationId) {
+                  return res.status(409).json({
+                            needsEscalation: true,
+                            error: `This request starts more than 6 months from today. Staff can normally only apply up to 6 months in advance — you'll need to escalate this to the CEO for approval before you can submit it.`,
+                  });
+          }
+          const esc = db.prepare('SELECT * FROM escalation_requests WHERE id=? AND employee_id=?').get(escalationId, user.id);
+          if (!esc || esc.status !== 'approved') {
+                  return res.status(409).json({ error: 'That escalation has not been approved by the CEO, or no longer exists.' });
+          }
+          if (new Date(esc.expires_at) < new Date()) {
+                  db.prepare(`UPDATE escalation_requests SET status='expired' WHERE id=?`).run(esc.id);
+                  return res.status(409).json({ error: 'Your 24-hour window to submit this escalated request has expired. Please ask the CEO to escalate again.' });
+          }
+          if (esc.type !== type || esc.start_date !== start || esc.end_date !== end) {
+                  return res.status(409).json({ error: 'This request must exactly match what was escalated and approved (type and dates).' });
+          }
+          usedEscalation = esc;
+    } else if (type === 'Annual' && days > remainingDaysAsOf(user, start)) {
           return res.status(409).json({
-                  error: `This request exceeds your accrued annual leave balance. You've earned ${accruedDays(user)} day(s) so far this leave year (${user.entitlement}/year, accrued monthly in arrears), minus ${user.used} used and ${user.pending} pending — ${remainingDays(user)} day(s) available.`,
+                  error: `This request exceeds what you'll have accrued by ${fmtDate(start)}. You'll have earned ${accruedDays(user, start)} day(s) of annual leave by then (${user.entitlement}/year, accrued monthly in arrears), minus ${user.used} used and ${user.pending} pending — ${remainingDaysAsOf(user, start)} day(s) available.`,
           });
     }
   const status = user.approver1 ? 'pending_1' : 'approved';
 
   const info = db
     .prepare(
-      `INSERT INTO leave_requests (employee_id, dept_id, type, start_date, end_date, days, reason, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            `INSERT INTO leave_requests (employee_id, dept_id, type, start_date, end_date, days, reason, status, created_at, escalation_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(user.id, user.dept_id, type, start, end, days, reason || '', status, nowIso());
+        .run(user.id, user.dept_id, type, start, end, days, reason || '', status, nowIso(), usedEscalation ? usedEscalation.id : null);
   const reqId = Number(info.lastInsertRowid);
+
+    if (usedEscalation) {
+          db.prepare(`UPDATE escalation_requests SET status='used' WHERE id=?`).run(usedEscalation.id);
+    }
 
   db.prepare(`INSERT INTO approval_trail (request_id, by_user_id, by_name, action, at) VALUES (?, ?, ?, ?, ?)`).run(
     reqId,
@@ -200,7 +233,7 @@ router.post('/leave-requests', (req, res) => {
     user.id,
     user.name,
     'leave_request_submitted',
-    `${type} leave, ${start} to ${end} (${days} day(s))`,
+        `${type} leave, ${start} to ${end} (${days} day(s))${usedEscalation ? ' — via approved escalation' : ''}`,
     nowIso()
   );
 
