@@ -130,7 +130,7 @@ function navItemsFor(u) {
     { id: 'request', label: 'Request leave' },
     { id: 'myrequests', label: 'My requests' },
   ];
-  if (u.isApprover) items.push({ id: 'approvals', label: 'Approvals' });
+  if (u.isApprover || u.role === 'director') items.push({ id: 'approvals', label: 'Approvals' });
   items.push({ id: 'teamcal', label: 'Team calendar' });
   items.push({ id: 'notifications', label: 'Notifications' });
   items.push({ id: 'admin', label: 'Admin settings' });
@@ -313,31 +313,71 @@ function readRequestDates() {
 }
 
 async function updateRequestPreview() {
-  const { start, end } = readRequestDates();
-  const box = document.getElementById('reqPreview');
-  const submitBtn = document.getElementById('submitBtn');
-  const availableInput = document.getElementById('reqAvailable');
-  try {
-    const p = new URLSearchParams({ start, end });
-    const preview = await api('/leave-requests/preview?' + p.toString());
-    if (availableInput) availableInput.value = preview.available + ' days';
-    if (!preview.valid) {
-      box.innerHTML = `<div class="warn-box">⚠️ ${preview.message}</div>`;
-      if (submitBtn) submitBtn.disabled = true;
-      return;
-    }
-    let html = `<div class="info-box">This request is for <b>${preview.days} business day(s)</b>, ${fmtDate(start)} – ${fmtDate(end)}. Approval route: <b>${preview.flow}</b>.</div>`;
-    if (preview.exceedsBalance) {
-      html += `<div class="warn-box">⚠️ This exceeds your available balance of ${preview.available} day(s).</div>`;
-    }
-    if (preview.blocked) {
-      html += `<div class="warn-box">🚫 Not permitted — only one person per department may be on leave at a time. ${preview.overlapNames.join(', ')} already ${preview.overlapNames.length > 1 ? 'have' : 'has'} approved or pending leave during this period. Please choose different dates.</div>`;
-    }
-    box.innerHTML = html;
-    if (submitBtn) submitBtn.disabled = preview.blocked;
-  } catch (e) {
-    box.innerHTML = `<div class="warn-box">⚠️ ${e.message}</div>`;
-  }
+     const { start, end } = readRequestDates();
+     const type = document.getElementById('reqType').value;
+     const box = document.getElementById('reqPreview');
+     const submitBtn = document.getElementById('submitBtn');
+     const availableInput = document.getElementById('reqAvailable');
+     window.activeEscalationId = null;
+     try {
+            const p = new URLSearchParams({ start, end });
+            const preview = await api('/leave-requests/preview?' + p.toString());
+            if (availableInput) availableInput.value = preview.available + ' days';
+            if (!preview.valid) {
+                     box.innerHTML = `<div class="warn-box">⚠️ ${preview.message}</div>`;
+                     if (submitBtn) submitBtn.disabled = true;
+                     return;
+            }
+            let html = `<div class="info-box">This request is for <b>${preview.days} business day(s)</b>, ${fmtDate(start)} – ${fmtDate(end)}. Approval route: <b>${preview.flow}</b>.</div>`;
+
+            if (preview.needsEscalation) {
+                     const { escalations } = await api('/leave-requests/escalations/mine');
+                     const match = escalations.find((e) => e.type === type && e.start === start && e.end === end);
+                     if (match && match.status === 'approved') {
+                                const hoursLeft = Math.max(0, Math.round((new Date(match.expiresAt) - new Date()) / 3600000));
+                                html += `<div class="info-box">✅ The CEO approved booking this far ahead. You have about ${hoursLeft} hour(s) left to submit before this approval expires.</div>`;
+                                window.activeEscalationId = match.id;
+                                box.innerHTML = html;
+                                if (submitBtn) submitBtn.disabled = false;
+                                return;
+                     }
+                     if (match && match.status === 'pending') {
+                                html += `<div class="warn-box">⏳ Waiting on the CEO to approve this escalation. You'll get a notification once it's decided.</div>`;
+                                box.innerHTML = html;
+                                if (submitBtn) submitBtn.disabled = true;
+                                return;
+                     }
+                     html += `<div class="warn-box">🚫 Staff can only book up to 6 months in advance through the normal flow. This start date is beyond that window, so it needs the CEO's approval first.</div>
+                             <div style="margin-top:8px;"><button class="btn secondary small" type="button" onclick="escalateRequest()">Escalate to management</button></div>`;
+                     box.innerHTML = html;
+                     if (submitBtn) submitBtn.disabled = true;
+                     return;
+            }
+
+            if (preview.exceedsBalance) {
+                     html += `<div class="warn-box">⚠️ This exceeds your available balance of ${preview.available} day(s).</div>`;
+            }
+            if (preview.blocked) {
+                     html += `<div class="warn-box">🚫 Not permitted — only one person per department may be on leave at a time. ${preview.overlapNames.join(', ')} already ${preview.overlapNames.length > 1 ? 'have' : 'has'} approved or pending leave during this period. Please choose different dates.</div>`;
+            }
+            box.innerHTML = html;
+            if (submitBtn) submitBtn.disabled = preview.blocked;
+     } catch (e) {
+            box.innerHTML = `<div class="warn-box">⚠️ ${e.message}</div>`;
+     }
+}
+
+async function escalateRequest() {
+     const type = document.getElementById('reqType').value;
+     const { start, end } = readRequestDates();
+     const reason = document.getElementById('reqReason').value;
+     try {
+            await api('/leave-requests/escalate', { method: 'POST', body: { type, start, end, reason } });
+            alert("Escalation request sent to the CEO for approval. You'll get a notification once it's decided, and then have 24 hours to submit the matching leave request.");
+            updateRequestPreview();
+     } catch (e) {
+            alert(e.message);
+     }
 }
 
 async function submitLeaveRequest() {
@@ -345,7 +385,7 @@ async function submitLeaveRequest() {
   const { start, end } = readRequestDates();
   const reason = document.getElementById('reqReason').value;
   try {
-    const result = await api('/leave-requests', { method: 'POST', body: { type, start, end, reason } });
+        const result = await api('/leave-requests', { method: 'POST', body: { type, start, end, reason, escalationId: window.activeEscalationId || undefined } });
     alert(`Request submitted: ${result.days} day(s) of ${type} leave, ${fmtDate(start)} – ${fmtDate(end)}. Status: ${statusLabel(result.status)}.`);
     currentView = 'myrequests';
     render();
@@ -390,6 +430,24 @@ async function viewApprovals() {
     html += `</table></div>`;
   }
   html += `</div>`;
+
+     if (user.role === 'director') {
+            const { pending: escalations } = await api('/escalations/pending');
+            html += `<div class="panel"><h2>Advance-leave escalations <span class="hint">Requests to book more than 6 months ahead — only you can approve these</span></h2>`;
+            if (escalations.length === 0) { html += `<div class="empty">No pending escalation requests.</div>`; }
+            else {
+                     html += `<div class="table-scroll"><table><tr><th>Employee</th><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th></th></tr>`;
+                     escalations.forEach((e) => {
+                                html += `<tr><td>${avatarHtml(e.employeeName)}${e.employeeName}</td><td>${e.type}</td><td>${fmtDate(e.start)}</td><td>${fmtDate(e.end)}</td><td>${e.days}</td><td style="color:var(--muted)">${e.reason || '—'}</td>
+                                          <td style="white-space:nowrap;">
+                                                      <button class="btn small" onclick="actOnEscalation(${e.id},'approve')">Approve</button>
+                                                                  <button class="btn small danger" onclick="actOnEscalation(${e.id},'reject')">Reject</button>
+                                                                            </td></tr>`;
+                     });
+                     html += `</table></div>`;
+            }
+            html += `</div>`;
+     }
   return html;
 }
 
@@ -401,6 +459,16 @@ async function actOnRequest(id, action) {
   } catch (e) {
     alert(e.message);
   }
+}
+
+async function actOnEscalation(id, action) {
+     try {
+            await api(`/escalations/${id}/${action}`, { method: 'POST' });
+            alert(action === 'reject' ? 'Escalation declined. The employee has been notified.' : 'Escalation approved. The employee now has 24 hours to submit the matching leave request.');
+            render();
+     } catch (e) {
+            alert(e.message);
+     }
 }
 
 function monthGrid(year, month, monthData, compact) {
