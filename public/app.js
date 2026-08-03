@@ -180,14 +180,18 @@ async function renderBell() {
 
 /* ---------------- Views ---------------- */
 
-function balanceCard(label, icon, color, ent, used, pending, available) {
+function balanceCard(label, icon, color, ent, used, pending, available, accrued) {
   const usedPct = ent > 0 ? Math.min(100, (used / ent) * 100) : 0;
+   const accruedLine = accrued != null
+       ? `<div class="balance-foot"><span>${accrued} of ${ent} accrued so far</span></div>`
+          : '';
   return `<div class="balance-card">
     <div class="balance-top"><span class="balance-label">${label}</span><span class="balance-icon" style="background:${color}22;color:${color}">${icon}</span></div>
     <div class="balance-num">${available}</div>
     <div class="balance-sub">days available</div>
     <div class="balance-bar"><div class="balance-bar-fill" style="width:${usedPct}%;background:${color}"></div></div>
     <div class="balance-foot"><span>${used} used</span><span>${pending} pending</span></div>
+    ${accruedLine}
   </div>`;
 }
 
@@ -201,7 +205,7 @@ async function viewDashboard() {
   </div>`;
 
   html += `<div class="balance-grid">`;
-  html += balanceCard('Annual leave', '☀️', '#0090bd', d.balances.annual.entitlement, d.balances.annual.used, d.balances.annual.pending, d.balances.annual.available);
+  html += balanceCard('Annual leave', '☀️', '#0090bd', d.balances.annual.entitlement, d.balances.annual.used, d.balances.annual.pending, d.balances.annual.available, d.balances.annual.accrued);
   html += balanceCard('Sick leave', '✚', '#dc2626', d.balances.sick.entitlement, d.balances.sick.used, d.balances.sick.pending, d.balances.sick.available);
   html += balanceCard('Family responsibility', '♥', '#d97706', d.balances.family.entitlement, d.balances.family.used, d.balances.family.pending, d.balances.family.available);
   html += `</div>`;
@@ -528,9 +532,9 @@ async function viewAdmin() {
 
   if (user.role === 'director') {
     const { employees } = await api('/admin/entitlements');
-    html += `<div class="panel"><h2>Employee entitlements <span class="hint">Visible to the CEO only — individual balances aren't shown to department managers, to avoid tenure-based conflicts of interest</span></h2><div class="table-scroll"><table><tr><th>Employee</th><th>Department</th><th>Entitlement</th><th>Used</th><th>Pending</th><th>Remaining</th></tr>`;
+    html += `<div class="panel"><h2>Employee entitlements <span class="hint">Visible to the CEO only — individual balances aren't shown to department managers, to avoid tenure-based conflicts of interest</span></h2><div class="table-scroll"><table><tr><th>Employee</th><th>Department</th><th>Annual entitlement</th><th>Accrued to date</th><th>Used</th><th>Pending</th><th>Remaining</th></tr>`;
     employees.forEach((e) => {
-      html += `<tr><td>${avatarHtml(e.name)}${e.name}</td><td>${e.department}</td><td>${e.entitlement}</td><td>${e.used}</td><td>${e.pending}</td><td><b style="color:var(--teal-dark)">${e.remaining}</b></td></tr>`;
+      html += `<tr><td>${avatarHtml(e.name)}${e.name}</td><td>${e.department}</td><td>${e.entitlement}</td><td>${e.accrued}</td><td>${e.used}</td><td>${e.pending}</td><td><b style="color:var(--teal-dark)">${e.remaining}</b></td></tr>`;
     });
     html += `</table></div></div>`;
   } else {
