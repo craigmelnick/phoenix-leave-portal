@@ -22,14 +22,17 @@ router.get('/calendar/month', (req, res) => {
   const startIso = `${year}-${String(month + 1).padStart(2, '0')}-01`;
   const endIso = `${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
 
+  // A request occupies [start_date, end_date) — end_date is the return-to-work day, not a leave
+  // day — so it only overlaps this month if it starts on/before the month's last day and ends
+  // strictly after the month's first day.
   let rows;
   if (deptId) {
     rows = db
-      .prepare(`SELECT * FROM leave_requests WHERE dept_id=? AND status != 'rejected' AND start_date <= ? AND end_date >= ?`)
+      .prepare(`SELECT * FROM leave_requests WHERE dept_id=? AND status NOT IN ('rejected','cancelled') AND start_date <= ? AND end_date > ?`)
       .all(deptId, endIso, startIso);
   } else {
     rows = db
-      .prepare(`SELECT * FROM leave_requests WHERE status != 'rejected' AND start_date <= ? AND end_date >= ?`)
+      .prepare(`SELECT * FROM leave_requests WHERE status NOT IN ('rejected','cancelled') AND start_date <= ? AND end_date > ?`)
       .all(endIso, startIso);
   }
   const allUsers = db.prepare('SELECT id, name FROM users').all();
@@ -40,9 +43,9 @@ router.get('/calendar/month', (req, res) => {
     const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const dow = new Date(year, month, d).getDay();
     const entries = rows
-      .filter((r) => iso >= r.start_date && iso <= r.end_date)
+      .filter((r) => iso >= r.start_date && iso < r.end_date)
       .map((r) => ({
-        employeeName: allUsers.find((u) => u.id === r.employee_id)?.name || '—',
+        employeeName: allUsers.find((u) => u.id === r.employee_id)?.name || '-',
         type: r.type,
         status: r.status,
         statusLabel: statusLabel(r.status),
