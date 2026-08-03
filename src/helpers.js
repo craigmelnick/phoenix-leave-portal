@@ -74,6 +74,36 @@ function remainingDays(user) {
     return Math.round((accruedDays(user) - user.used - user.pending) * 100) / 100;
 }
 
+// How far ahead someone is allowed to book leave in the normal flow before it needs management
+// escalation — six calendar months, matching company policy.
+function addMonths(date, n) {
+    const d = new Date(date);
+    d.setMonth(d.getMonth() + n);
+    return d;
+}
+
+function advanceWindowCutoff(asOf) {
+    return toLocalIso(addMonths(asOf ? new Date(asOf) : new Date(), 6));
+}
+
+function isBeyondAdvanceWindow(startIso, asOf) {
+    return startIso > advanceWindowCutoff(asOf);
+}
+
+// Same idea as remainingDays(), but projected forward to a future date — lets someone book
+// annual leave they haven't earned yet today, as long as they will have earned it by the time
+// the leave actually starts (and it's within the 6-month advance window above).
+function remainingDaysAsOf(user, asOfIso) {
+    return Math.round((accruedDays(user, asOfIso) - user.used - user.pending) * 100) / 100;
+}
+
+// How many days someone has already taken/approved+pending beyond what they've actually earned
+// as of today — the exposure HR would need to claw back from a final salary if they resigned
+// right now. Zero once accrual catches up.
+function advanceDaysTaken(user) {
+    return Math.max(0, Math.round((user.used + user.pending - accruedDays(user)) * 100) / 100);
+}
+
 // The backup pool for the *second* (final) approval step — either person can act.
 // Defaults to the CEO if no second approver has been assigned.
 function stage2Pool(employee) {
@@ -143,6 +173,9 @@ module.exports = {
     businessDaysBetween,
     remainingDays,
     accruedDays,
+    isBeyondAdvanceWindow,
+    remainingDaysAsOf,
+    advanceDaysTaken,
     stage2Pool,
     getCeoId,
     isAwaitingApproval,
