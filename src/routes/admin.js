@@ -129,23 +129,30 @@ router.post('/admin/employees', requireDirector, (req, res) => {
 });
 
 router.put('/admin/employees/:id', requireDirector, (req, res) => {
-  const target = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
-  if (!target) return res.status(404).json({ error: 'Employee not found.' });
-  const { name, deptId, role, title, entitlement, active, hireDate, contractMonths } = req.body;
+    const target = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+    if (!target) return res.status(404).json({ error: 'Employee not found.' });
+    const { name, deptId, role, title, entitlement, active, hireDate, contractMonths } = req.body;
     db.prepare(
-          `UPDATE users SET name=COALESCE(?,name), dept_id=?, role=COALESCE(?,role), title=?, entitlement=COALESCE(?,entitlement), active=COALESCE(?,active), hire_date=COALESCE(?,hire_date), contract_months=? WHERE id=?`
+          `UPDATE users SET name=?, dept_id=?, role=?, title=?, entitlement=?, active=?, hire_date=?, contract_months=? WHERE id=?`
         ).run(
-          name,
-          deptId ?? target.dept_id,
-          role,
-          title,
-          entitlement !== undefined ? Number(entitlement) : undefined,
-          active !== undefined ? (active ? 1 : 0) : undefined,
-          hireDate || null,
+          name !== undefined ? name : target.name,
+          deptId !== undefined ? deptId : target.dept_id,
+          role !== undefined ? role : target.role,
+          title !== undefined ? title : target.title,
+          entitlement !== undefined ? Number(entitlement) : target.entitlement,
+          active !== undefined ? (active ? 1 : 0) : target.active,
+          hireDate !== undefined ? hireDate : target.hire_date,
           contractMonths !== undefined ? (contractMonths ? Number(contractMonths) : null) : target.contract_months,
           target.id
         );
-  res.json({ ok: true });
+    db.prepare('INSERT INTO audit_log (actor_id, actor_name, action, detail, at) VALUES (?, ?, ?, ?, ?)').run(
+          req.user.id,
+          req.user.name,
+          'employee_updated',
+          `Updated ${target.name}'s record` + (entitlement !== undefined ? ` — annual entitlement set to ${Number(entitlement)} day(s)` : ''),
+          nowIso()
+        );
+    res.json({ ok: true });
 });
 
 // ---- Manual leave-year rollover trigger (also runs automatically each 1 March — see cron in server.js) ----
