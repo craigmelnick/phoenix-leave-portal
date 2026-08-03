@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth, requireDirector } = require('../middleware/auth');
-const { remainingDays, accruedDays, nowIso, statusLabel, fmtDate } = require('../helpers');
+const { remainingDays, remainingDaysAdvance, accruedDays, nowIso, statusLabel, fmtDate } = require('../helpers');
 const { pushNotification } = require('../notify');
 
 const router = express.Router();
@@ -75,6 +75,8 @@ router.get('/admin/report', (req, res) => {
 });
 
 // ---- Employee entitlements - CEO-only (privacy: managers never see individual balances) ----
+// "remaining" here includes the advance-booking window (everyone automatically qualifies for
+// it), matching what the employee themselves sees as their available balance on their dashboard.
 router.get('/admin/entitlements', requireDirector, (req, res) => {
   const users = db.prepare(`SELECT * FROM users WHERE dept_id IS NOT NULL AND active=1 ORDER BY name`).all();
   const departments = db.prepare('SELECT * FROM departments').all();
@@ -87,7 +89,7 @@ router.get('/admin/entitlements', requireDirector, (req, res) => {
       accrued: accruedDays(u),
       used: u.used,
       pending: u.pending,
-      remaining: remainingDays(u),
+      remaining: remainingDaysAdvance(u),
       hireDate: u.hire_date,
       contractMonths: u.contract_months,
     })),
