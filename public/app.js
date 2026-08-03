@@ -532,9 +532,12 @@ async function viewAdmin() {
 
   if (user.role === 'director') {
     const { employees } = await api('/admin/entitlements');
-    html += `<div class="panel"><h2>Employee entitlements <span class="hint">Visible to the CEO only — individual balances aren't shown to department managers, to avoid tenure-based conflicts of interest</span></h2><div class="table-scroll"><table><tr><th>Employee</th><th>Department</th><th>Annual entitlement</th><th>Accrued to date</th><th>Used</th><th>Pending</th><th>Remaining</th></tr>`;
+    html += `<div class="panel"><h2>Employee entitlements <span class="hint">Visible to the CEO only — individual balances aren't shown to department managers, to avoid tenure-based conflicts of interest</span></h2><p class="hint" style="margin:4px 0 10px;">Annual entitlement is earned monthly in arrears from each person's hire date (reset to 1 March each leave year) — "Accrued to date" is what's actually available to take right now. Fixed-term contract staff stop accruing once their contract ends.</p><div class="table-scroll"><table><tr><th>Employee</th><th>Department</th><th>Since</th><th>Annual entitlement</th><th>Accrued to date</th><th>Used</th><th>Pending</th><th>Remaining</th></tr>`;
     employees.forEach((e) => {
-      html += `<tr><td>${avatarHtml(e.name)}${e.name}</td><td>${e.department}</td><td>${e.entitlement}</td><td>${e.accrued}</td><td>${e.used}</td><td>${e.pending}</td><td><b style="color:var(--teal-dark)">${e.remaining}</b></td></tr>`;
+           const since = e.hireDate ? fmtDate(e.hireDate) : '—';
+           const contractNote = e.contractMonths ? `<div class="hint">${e.contractMonths}-month contract</div>` : '';
+           html += `<tr><td>${avatarHtml(e.name)}${e.name}</td><td>${e.department}</td><td>${since}${contractNote}</td><td>${e.entitlement}</td><td>${e.accrued}</td><td>${e.used}</td><td>${e.pending}</td><td><b style="color:var(--teal-dark)">${e.remaining}</b></td></tr>`;
+       
     });
     html += `</table></div></div>`;
   } else {
