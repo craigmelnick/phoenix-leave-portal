@@ -2,7 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { isAwaitingApproval, stage2Pool, fmtDate, statusLabel, nowIso } = require('../helpers');
-const { notifyOnApproval } = require('../notify');
+const { notifyOnApproval, notifyApprovalNeeded } = require('../notify');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -83,6 +83,7 @@ function handleDecision(req, res, action) {
       `Request #${r.id} for ${employee.name}`,
       nowIso()
     );
+    stage2Pool(employee).forEach((id) => notifyApprovalNeeded(r, employee, id));
     return res.json({ ok: true, status: 'pending_2' });
   }
 
