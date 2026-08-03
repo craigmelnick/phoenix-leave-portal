@@ -86,6 +86,8 @@ router.get('/admin/entitlements', requireDirector, (req, res) => {
       used: u.used,
       pending: u.pending,
       remaining: remainingDays(u),
+      hireDate: u.hire_date,
+            contractMonths: u.contract_months,
     })),
   });
 });
@@ -98,14 +100,24 @@ router.get('/admin/employees', requireDirector, (req, res) => {
 });
 
 router.post('/admin/employees', requireDirector, (req, res) => {
-  const { id, name, email, deptId, role, title, entitlement } = req.body;
+  const { id, name, email, deptId, role, title, entitlement, hireDate, contractMonths } = req.body;
   if (!id || !name || !email) return res.status(400).json({ error: 'id, name and email are required.' });
   const exists = db.prepare('SELECT id FROM users WHERE id=? OR lower(email)=?').get(id, String(email).toLowerCase());
   if (exists) return res.status(409).json({ error: 'An employee with that ID or email already exists.' });
   db.prepare(
-    `INSERT INTO users (id, name, email, dept_id, role, title, entitlement, used, pending, active)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 1)`
-  ).run(id, name, String(email).toLowerCase(), deptId || null, role || 'staff', title || null, Number(entitlement) || 15);
+          `INSERT INTO users (id, name, email, dept_id, role, title, entitlement, used, pending, active, hire_date, contract_months)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 1, ?, ?)`
+        ).run(
+          id,
+          name,
+          String(email).toLowerCase(),
+          deptId || null,
+          role || 'staff',
+          title || null,
+          Number(entitlement) || 15,
+          hireDate || null,
+          contractMonths ? Number(contractMonths) : null
+        );
   db.prepare('INSERT INTO audit_log (actor_id, actor_name, action, detail, at) VALUES (?, ?, ?, ?, ?)').run(
     req.user.id,
     req.user.name,
@@ -119,10 +131,20 @@ router.post('/admin/employees', requireDirector, (req, res) => {
 router.put('/admin/employees/:id', requireDirector, (req, res) => {
   const target = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
   if (!target) return res.status(404).json({ error: 'Employee not found.' });
-  const { name, deptId, role, title, entitlement, active } = req.body;
-  db.prepare(
-    `UPDATE users SET name=COALESCE(?,name), dept_id=?, role=COALESCE(?,role), title=?, entitlement=COALESCE(?,entitlement), active=COALESCE(?,active) WHERE id=?`
-  ).run(name, deptId ?? target.dept_id, role, title, entitlement !== undefined ? Number(entitlement) : undefined, active !== undefined ? (active ? 1 : 0) : undefined, target.id);
+  const { name, deptId, role, title, entitlement, active, hireDate, contractMonths } = req.body;
+    db.prepare(
+          `UPDATE users SET name=COALESCE(?,name), dept_id=?, role=COALESCE(?,role), title=?, entitlement=COALESCE(?,entitlement), active=COALESCE(?,active), hire_date=COALESCE(?,hire_date), contract_months=? WHERE id=?`
+        ).run(
+          name,
+          deptId ?? target.dept_id,
+          role,
+          title,
+          entitlement !== undefined ? Number(entitlement) : undefined,
+          active !== undefined ? (active ? 1 : 0) : undefined,
+          hireDate || null,
+          contractMonths !== undefined ? (contractMonths ? Number(contractMonths) : null) : target.contract_months,
+          target.id
+        );
   res.json({ ok: true });
 });
 
