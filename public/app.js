@@ -13,6 +13,7 @@ let calMonthIdx = new Date().getMonth();
 let calYear = new Date().getFullYear();
 let pendingEmail = null;
 let devOtp = null;
+let roster = [];
 
 /* ---------------- API helper ---------------- */
 
@@ -60,12 +61,15 @@ function renderLogin() {
     <h2>Phoenix Leave Portal</h2>`;
   if (!pendingEmail) {
     html += `<p>Sign in to manage your leave.</p>
-      <div class="login-field"><label>Company email</label>
-        <input id="loginEmail" type="email" placeholder="you@phoenixintl.co.za">
-      </div>
-      <div class="otp-demo-note">We'll email you a one-time code — it's free to send and everyone already has a company inbox, so there's nothing to install and no per-message cost.</div>
-      <div id="loginError" style="color:var(--red);font-size:12.5px;margin-bottom:6px;min-height:16px;"></div>
-      <button class="btn full" onclick="requestOtp()">Email me a code</button>`;
+          <div class="login-field"><label>Your name</label>
+                  <select id="loginName">
+                            <option value="">Select your name…</option>
+                                      ${roster.map((u) => `<option value="${u.email}">${u.name}</option>`).join('')}
+                                              </select>
+                                                    </div>
+                                                          <div class="otp-demo-note">We'll email you a one-time code — it's free to send and everyone already has a company inbox, so there's nothing to install and no per-message cost.</div>
+                                                                <div id="loginError" style="color:var(--red);font-size:12.5px;margin-bottom:6px;min-height:16px;"></div>
+                                                                      <button class="btn full" onclick="requestOtp()">Email me a code</button>`;
   } else {
     html += `<p>Enter the 4-digit code sent to<br><b>${pendingEmail}</b>.</p>`;
     if (devOtp) {
@@ -81,8 +85,8 @@ function renderLogin() {
 }
 
 async function requestOtp() {
-  const email = document.getElementById('loginEmail').value.trim();
-  if (!email) { document.getElementById('loginError').textContent = 'Please enter your email address.'; return; }
+  const email = document.getElementById('loginName').value.trim();
+  if (!email) { document.getElementById('loginError').textContent = 'Please select your name.; return; }
   try {
     const result = await api('/auth/request-otp', { method: 'POST', body: { email } });
     pendingEmail = email;
@@ -657,6 +661,7 @@ async function render() {
     document.getElementById('app').style.display = 'flex';
     render();
   } catch (e) {
-    renderLogin();
+try { const r = await api('/auth/roster'); roster = r.users || []; } catch (_) { roster = []; }
+         renderLogin();
   }
 })();
