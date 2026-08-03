@@ -49,7 +49,7 @@ function avatarHtml(name) {
   return `<span class="avatar" style="background:${avatarColorFor(name)}">${initials}</span>`;
 }
 function statusLabel(s) {
-  return { pending_1: 'Pending 1st approval', pending_2: 'Pending 2nd approval', approved: 'Approved', rejected: 'Rejected' }[s] || s;
+  return { pending_1: 'Pending 1st approval', pending_2: 'Pending 2nd approval', approved: 'Approved', rejected: 'Rejected', cancelled: 'Cancelled' }[s] || s;
 }
 
 /* ---------------- Login / OTP ---------------- */
@@ -133,7 +133,7 @@ function navItemsFor(u) {
   if (u.isApprover || u.role === 'director') items.push({ id: 'approvals', label: 'Approvals' });
   items.push({ id: 'teamcal', label: 'Team calendar' });
   items.push({ id: 'notifications', label: 'Notifications' });
-  items.push({ id: 'admin', label: 'Admin settings' });
+  if (u.role === 'director') items.push({ id: 'admin', label: 'Admin settings' });
   items.push({ id: 'ideas', label: 'Platform ideas' });
   return items;
 }
@@ -250,28 +250,8 @@ async function saveNoticeboard() {
   render();
 }
 
-function buildDaySelect(id, sel) {
-  let opts = '';
-  for (let d = 1; d <= 31; d++) { const v = String(d).padStart(2, '0'); opts += `<option value="${v}" ${v === sel ? 'selected' : ''}>${d}</option>`; }
-  return `<select id="${id}" style="flex:1;">${opts}</select>`;
-}
-function buildMonthSelect(id, sel) {
-  let opts = '';
-  MONTH_NAMES.forEach((m, i) => { const v = String(i + 1).padStart(2, '0'); opts += `<option value="${v}" ${v === sel ? 'selected' : ''}>${m}</option>`; });
-  return `<select id="${id}" style="flex:2;">${opts}</select>`;
-}
-function buildYearSelect(id, sel) {
-  let opts = '';
-  const y0 = new Date().getFullYear();
-  [y0 - 1, y0, y0 + 1, y0 + 2].forEach((y) => { opts += `<option value="${y}" ${String(y) === sel ? 'selected' : ''}>${y}</option>`; });
-  return `<select id="${id}" style="flex:1;">${opts}</select>`;
-}
-
 function viewRequest() {
-  const today = new Date();
-  const dd = String(today.getDate()).padStart(2, '0');
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const yy = String(today.getFullYear());
+  const todayIso = new Date().toISOString().slice(0, 10);
   return `<div class="panel"><h2>Request leave <span class="hint">Business days only — weekends &amp; public holidays are excluded automatically</span></h2>
       <p style="margin:-8px 0 16px;font-size:13.5px;color:var(--ink);">Applicant: <b>${user.name}</b></p>
       <div class="form-grid">
@@ -281,11 +261,11 @@ function viewRequest() {
       <div class="form-field"><label>Available balance</label>
         <input id="reqAvailable" value="…" disabled>
       </div>
-      <div class="form-field"><label>Start date <span class="hint">day / month / year</span></label>
-        <div style="display:flex;gap:6px;">${buildDaySelect('reqStartDay', dd)}${buildMonthSelect('reqStartMonth', mm)}${buildYearSelect('reqStartYear', yy)}</div>
+      <div class="form-field"><label>Start date</label>
+        <input type="date" id="reqStart" value="${todayIso}">
       </div>
-      <div class="form-field"><label>End date <span class="hint">day / month / year</span></label>
-        <div style="display:flex;gap:6px;">${buildDaySelect('reqEndDay', dd)}${buildMonthSelect('reqEndMonth', mm)}${buildYearSelect('reqEndYear', yy)}</div>
+      <div class="form-field"><label>End date <span class="hint">the day you return to work — e.g. the 16th to the 19th is 3 days off</span></label>
+        <input type="date" id="reqEnd" value="${todayIso}">
       </div>
       <div class="form-field full"><label>Reason (optional)</label><textarea id="reqReason" rows="2" placeholder="e.g. family trip, medical appointment..."></textarea></div>
       <div class="form-field full" id="docField" style="display:none;">
@@ -307,8 +287,8 @@ function toggleDocField() {
 }
 
 function readRequestDates() {
-  const start = `${document.getElementById('reqStartYear').value}-${document.getElementById('reqStartMonth').value}-${document.getElementById('reqStartDay').value}`;
-  const end = `${document.getElementById('reqEndYear').value}-${document.getElementById('reqEndMonth').value}-${document.getElementById('reqEndDay').value}`;
+  const start = document.getElementById('reqStart').value;
+  const end = document.getElementById('reqEnd').value;
   return { start, end };
 }
 
@@ -320,7 +300,7 @@ async function updateRequestPreview() {
      const availableInput = document.getElementById('reqAvailable');
      window.activeEscalationId = null;
      try {
-            const p = new URLSearchParams({ start, end });
+            const p = new URLSearchParams({ start, end, type });
             const preview = await api('/leave-requests/preview?' + p.toString());
             if (availableInput) availableInput.value = preview.available + ' days';
             if (!preview.valid) {
@@ -404,14 +384,27 @@ async function viewMyRequests() {
       const trailText = r.trail.length ? r.trail.join('<br>') : '—';
       const docText = r.doc ? `<br><span style="color:var(--muted);">📎 ${r.doc}</span>` : '';
       const certBtn = r.status === 'approved' ? `<button class="btn small secondary" onclick="openCertificate(${r.id})">Certificate</button>` : '';
+      const cancellable = ['pending_1', 'pending_2', 'approved'].includes(r.status);
+      const cancelBtn = cancellable ? `<button class="btn small danger" onclick="cancelMyRequest(${r.id})" title="Withdraw this request">✕ Cancel</button>` : '';
       html += `<tr><td>${r.type}</td><td>${fmtDate(r.start)}</td><td>${fmtDate(r.end)}</td><td>${r.days}</td>
         <td><span class="pill ${r.status}">${r.statusLabel}</span></td><td style="color:var(--muted)">${r.reason || '—'}${docText}</td>
-        <td style="font-size:11.5px;color:var(--muted);">${trailText}</td><td style="white-space:nowrap;">${certBtn}</td></tr>`;
+        <td style="font-size:11.5px;color:var(--muted);">${trailText}</td><td style="white-space:nowrap;">${certBtn} ${cancelBtn}</td></tr>`;
     });
     html += `</table></div>`;
   }
   html += `</div>`;
   return html;
+}
+
+async function cancelMyRequest(id) {
+  if (!confirm('Cancel this leave request? Any used or pending days will be added back to your balance.')) return;
+  try {
+    await api(`/leave-requests/${id}/cancel`, { method: 'POST' });
+    alert('Your request has been cancelled and your balance has been updated.');
+    render();
+  } catch (e) {
+    alert(e.message);
+  }
 }
 
 async function viewApprovals() {
@@ -590,8 +583,38 @@ async function viewAdmin() {
       </tr>`;
     });
     html += `</table></div></div>`;
+
+    const { employees: allEmp } = await api('/admin/employees');
+    html += `<div class="panel"><h2>User roles <span class="hint">Set who has admin (CEO/Director) access vs a regular staff account</span></h2>
+      <div class="table-scroll"><table><tr><th>Employee</th><th>Role</th><th></th></tr>`;
+    allEmp.forEach((e) => {
+      html += `<tr>
+        <td>${avatarHtml(e.name)}${e.name}</td>
+        <td><select id="role_${e.id}">
+          <option value="staff" ${e.role === 'staff' ? 'selected' : ''}>Regular user</option>
+          <option value="manager" ${e.role === 'manager' ? 'selected' : ''}>Manager (approver)</option>
+          <option value="director" ${e.role === 'director' ? 'selected' : ''}>Admin (Director / CEO)</option>
+        </select></td>
+        <td><button class="btn small" onclick="saveRole('${e.id}')">Save</button></td>
+      </tr>`;
+    });
+    html += `</table></div></div>`;
+
+    const { requests: allReqs } = await api('/admin/leave-requests');
+    html += `<div class="panel"><h2>All leave requests <span class="hint">Cancel any request company-wide — the employee is notified automatically</span></h2>`;
+    if (allReqs.length === 0) { html += `<div class="empty">No active leave requests.</div>`; }
+    else {
+      html += `<div class="table-scroll"><table><tr><th>Employee</th><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Status</th><th></th></tr>`;
+      allReqs.forEach((r) => {
+        html += `<tr><td>${avatarHtml(r.employeeName)}${r.employeeName}</td><td>${r.type}</td><td>${fmtDate(r.start)}</td><td>${fmtDate(r.end)}</td><td>${r.days}</td>
+          <td><span class="pill ${r.status}">${r.statusLabel}</span></td>
+          <td><button class="btn small danger" onclick="adminCancelRequest(${r.id})" title="Cancel this leave request">✕ Cancel</button></td></tr>`;
+      });
+      html += `</table></div>`;
+    }
+    html += `</div>`;
   } else {
-    html += `<div class="info-box">Only the CEO can view or change who approves each person's leave.</div>`;
+    html += `<div class="info-box">Only the CEO can view or change who approves each person's leave, assign user roles, or cancel someone else's leave request.</div>`;
   }
 
   const report = await api('/admin/report');
@@ -613,7 +636,7 @@ async function viewAdmin() {
     employees.forEach((e) => {
            const since = e.hireDate ? fmtDate(e.hireDate) : '—';
            const contractNote = e.contractMonths ? `<div class="hint">${e.contractMonths}-month contract</div>` : '';
-           html += `<tr><td>${avatarHtml(e.name)}${e.name}</td><td>${e.department}</td><td>${since}${contractNote}</td><td><input type="number" id="ent_${e.id}" value="${e.entitlement}" step="0.5" style="width:70px;"> <button class="btn secondary small" onclick="saveEntitlement(${e.id})">Save</button></td><td>${e.accrued}</td><td>${e.used}</td><td>${e.pending}</td><td><b style="color:var(--teal-dark)">${e.remaining}</b></td></tr>`;
+           html += `<tr><td>${avatarHtml(e.name)}${e.name}</td><td>${e.department}</td><td>${since}${contractNote}</td><td><input type="number" id="ent_${e.id}" value="${e.entitlement}" step="0.5" style="width:70px;"> <button class="btn secondary small" onclick="saveEntitlement('${e.id}')">Save</button></td><td>${e.accrued}</td><td>${e.used}</td><td>${e.pending}</td><td><b style="color:var(--teal-dark)">${e.remaining}</b></td></tr>`;
        
     });
     html += `</table></div></div>`;
@@ -630,6 +653,24 @@ async function saveApprovers(userId) {
   await api(`/admin/approvers/${userId}`, { method: 'POST', body: { approver1, approver2, approver3 } });
   alert('Approvers updated.');
   render();
+}
+
+async function saveRole(userId) {
+  const role = document.getElementById('role_' + userId).value;
+  await api(`/admin/employees/${userId}`, { method: 'PUT', body: { role } });
+  alert('Role updated.');
+  render();
+}
+
+async function adminCancelRequest(id) {
+  if (!confirm('Cancel this leave request? The employee will be notified and any used/pending days will be restored to their balance.')) return;
+  try {
+    await api(`/admin/leave-requests/${id}/cancel`, { method: 'POST' });
+    alert('Request cancelled and the employee has been notified.');
+    render();
+  } catch (e) {
+    alert(e.message);
+  }
 }
 
 async function saveEntitlement(userId) {
@@ -714,7 +755,7 @@ async function render() {
     else if (currentView === 'approvals') html = await viewApprovals();
     else if (currentView === 'teamcal') html = await viewTeamCal();
     else if (currentView === 'notifications') html = await viewNotifications();
-    else if (currentView === 'admin') html = await viewAdmin();
+    else if (currentView === 'admin') html = user.role === 'director' ? await viewAdmin() : (currentView = 'dashboard', await viewDashboard());
     else if (currentView === 'ideas') html = viewIdeas();
     else if (currentView === 'certificate') html = await viewCertificate();
   } catch (e) {
@@ -723,7 +764,7 @@ async function render() {
   content.innerHTML = html;
 
   if (currentView === 'request') {
-    ['reqStartDay', 'reqStartMonth', 'reqStartYear', 'reqEndDay', 'reqEndMonth', 'reqEndYear'].forEach((id) => {
+    ['reqStart', 'reqEnd'].forEach((id) => {
       document.getElementById(id).addEventListener('change', updateRequestPreview);
     });
     document.getElementById('reqType').addEventListener('change', () => { toggleDocField(); updateRequestPreview(); });
