@@ -108,6 +108,37 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS escalation_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id TEXT NOT NULL REFERENCES users(id),
+      type TEXT NOT NULL,
+        start_date TEXT NOT NULL,
+          end_date TEXT NOT NULL,
+            days REAL NOT NULL,
+              reason TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                  requested_at TEXT NOT NULL,
+                    decided_at TEXT,
+                      decided_by TEXT,
+                        approved_at TEXT,
+                          expires_at TEXT
+                          );
 `);
+
+// Columns/tables added after initial launch. SQLite's ALTER TABLE ADD COLUMN has no "IF NOT
+// EXISTS" form, so this guards each one with try/catch and swallows only the "already there"
+// error, meaning it's safe to run on every boot regardless of whether this is a brand new
+// database or one that already has the column from a previous deploy.
+function addColumnIfMissing(table, columnDef) {
+  try {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
+  } catch (err) {
+    if (!/duplicate column name/i.test(err.message)) throw err;
+  }
+}
+addColumnIfMissing('users', 'hire_date TEXT');
+addColumnIfMissing('users', 'contract_months INTEGER');
+addColumnIfMissing('leave_requests', 'escalation_id INTEGER REFERENCES escalation_requests(id)');
 
 module.exports = db;
