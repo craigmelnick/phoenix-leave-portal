@@ -7,8 +7,10 @@ const {
   businessDaysBetween,
   remainingDays,
   accruedDays,
+  advanceWindowCutoff,
   isBeyondAdvanceWindow,
   remainingDaysAsOf,
+  remainingDaysAdvance,
   advanceDaysTaken,
   stage2Pool,
   isAwaitingApproval,
@@ -85,11 +87,28 @@ router.get('/dashboard', (req, res) => {
   const noticeboard = db.prepare(`SELECT value FROM settings WHERE key='noticeboard'`).get();
   const isYearEndWindow = today.getMonth() === 0 || today.getMonth() === 1;
 
+  // Annual leave's headline "available" figure includes the advance-booking window (everyone
+  // automatically qualifies for it - 6 months ahead in March, growing to the full leave year by
+  // September), not just what's strictly accrued as of today. "accrued" stays literal, and
+  // advanceEligible/advanceWindowEnd let the UI explain the gap between the two.
+  const advanceAvailable = remainingDaysAdvance(user);
+  const trueAvailable = remainingDays(user);
+
   res.json({
     firstName: user.name.split(' ')[0],
     heroLine,
     balances: {
-      annual: { label: 'Annual leave', entitlement: user.entitlement, accrued: accruedDays(user), used: user.used, pending: user.pending, available: remainingDays(user), advanceTaken: advanceDaysTaken(user) },
+      annual: {
+        label: 'Annual leave',
+        entitlement: user.entitlement,
+        accrued: accruedDays(user),
+        used: user.used,
+        pending: user.pending,
+        available: advanceAvailable,
+        advanceTaken: advanceDaysTaken(user),
+        advanceEligible: Math.max(0, Math.round((advanceAvailable - trueAvailable) * 100) / 100),
+        advanceWindowEnd: advanceWindowCutoff(),
+      },
       sick: { label: 'Sick leave', entitlement: 10, used: sick.used, pending: sick.pending, available: Math.max(0, 10 - sick.used - sick.pending) },
       family: { label: 'Family responsibility', entitlement: 3, used: fam.used, pending: fam.pending, available: Math.max(0, 3 - fam.used - fam.pending) },
     },
