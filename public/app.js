@@ -269,7 +269,8 @@ function viewRequest() {
   const mm = String(today.getMonth() + 1).padStart(2, '0');
   const yy = String(today.getFullYear());
   return `<div class="panel"><h2>Request leave <span class="hint">Business days only — weekends &amp; public holidays are excluded automatically</span></h2>
-    <div class="form-grid">
+      <p style="margin:-8px 0 16px;font-size:13.5px;color:var(--ink);">Applicant: <b>${user.name}</b></p>
+      <div class="form-grid">
       <div class="form-field"><label>Leave type</label>
         <select id="reqType"><option>Annual</option><option>Sick</option><option>Family Responsibility</option><option>Study Leave</option><option>Maternity</option><option>Paternity</option><option>Unpaid</option></select>
       </div>
