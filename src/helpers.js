@@ -108,6 +108,16 @@ function remainingDaysAsOf(user, asOfIso) {
   return Math.round((accruedDays(user, asOfIso) - user.used - user.pending) * 100) / 100;
 }
 
+// The headline "available to book right now" balance, including the advance-booking window —
+// everyone automatically qualifies for the growing advance window (6 months in March, growing
+// by a month each month, and the whole rest of the leave year from September), so this is what
+// actually gets shown to staff and the CEO as the leave balance, rather than only what's strictly
+// accrued as of today. Never runs past the leave year end, since nothing is earned beyond that
+// without a fresh leave year starting.
+function remainingDaysAdvance(user) {
+  return remainingDaysAsOf(user, advanceWindowCutoff());
+}
+
 // How many days someone has already taken/approved+pending beyond what they've actually earned
 // as of today — the exposure HR would need to claw back from a final salary if they resigned
 // right now. Zero once accrual catches up.
@@ -185,8 +195,10 @@ module.exports = {
   businessDaysBetween,
   remainingDays,
   accruedDays,
+  advanceWindowCutoff,
   isBeyondAdvanceWindow,
   remainingDaysAsOf,
+  remainingDaysAdvance,
   advanceDaysTaken,
   stage2Pool,
   getCeoId,
