@@ -613,7 +613,7 @@ async function viewAdmin() {
     employees.forEach((e) => {
            const since = e.hireDate ? fmtDate(e.hireDate) : '—';
            const contractNote = e.contractMonths ? `<div class="hint">${e.contractMonths}-month contract</div>` : '';
-           html += `<tr><td>${avatarHtml(e.name)}${e.name}</td><td>${e.department}</td><td>${since}${contractNote}</td><td>${e.entitlement}</td><td>${e.accrued}</td><td>${e.used}</td><td>${e.pending}</td><td><b style="color:var(--teal-dark)">${e.remaining}</b></td></tr>`;
+           html += `<tr><td>${avatarHtml(e.name)}${e.name}</td><td>${e.department}</td><td>${since}${contractNote}</td><td><input type="number" id="ent_${e.id}" value="${e.entitlement}" step="0.5" style="width:70px;"> <button class="btn secondary small" onclick="saveEntitlement(${e.id})">Save</button></td><td>${e.accrued}</td><td>${e.used}</td><td>${e.pending}</td><td><b style="color:var(--teal-dark)">${e.remaining}</b></td></tr>`;
        
     });
     html += `</table></div></div>`;
@@ -630,6 +630,13 @@ async function saveApprovers(userId) {
   await api(`/admin/approvers/${userId}`, { method: 'POST', body: { approver1, approver2, approver3 } });
   alert('Approvers updated.');
   render();
+}
+
+async function saveEntitlement(userId) {
+     const value = document.getElementById('ent_' + userId).value;
+     await api(`/admin/employees/${userId}`, { method: 'PUT', body: { entitlement: Number(value) } });
+     alert('Entitlement updated.');
+     render();
 }
 
 function openCertificate(id) { certificateReqId = id; currentView = 'certificate'; render(); }
