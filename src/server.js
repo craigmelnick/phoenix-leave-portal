@@ -32,7 +32,16 @@ app.use('/api', notificationsRoutes);
 app.use('/api', calendarRoutes);
 app.use('/api', adminRoutes);
 
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// no-cache (not "don't cache" — "always revalidate with the server first") so that every
+// deploy is reflected immediately for everyone, instead of browsers silently serving an old
+// cached copy of app.js/styles.css until someone happens to hard-refresh.
+app.use(
+    express.static(path.join(__dirname, '..', 'public'), {
+          etag: true,
+          lastModified: true,
+          setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+    })
+  );
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
