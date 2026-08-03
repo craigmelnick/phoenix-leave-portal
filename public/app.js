@@ -184,11 +184,14 @@ async function renderBell() {
 
 /* ---------------- Views ---------------- */
 
-function balanceCard(label, icon, color, ent, used, pending, available, accrued) {
+function balanceCard(label, icon, color, ent, used, pending, available, accrued, advanceTaken) {
   const usedPct = ent > 0 ? Math.min(100, (used / ent) * 100) : 0;
    const accruedLine = accrued != null
        ? `<div class="balance-foot"><span>${accrued} of ${ent} accrued so far</span></div>`
           : '';
+     const advanceLine = advanceTaken > 0
+         ? `<div class="balance-foot" style="color:#b45309;"><span>⚠ ${advanceTaken} advance day(s) taken (not yet earned)</span></div>`
+              : '';
   return `<div class="balance-card">
     <div class="balance-top"><span class="balance-label">${label}</span><span class="balance-icon" style="background:${color}22;color:${color}">${icon}</span></div>
     <div class="balance-num">${available}</div>
@@ -196,6 +199,7 @@ function balanceCard(label, icon, color, ent, used, pending, available, accrued)
     <div class="balance-bar"><div class="balance-bar-fill" style="width:${usedPct}%;background:${color}"></div></div>
     <div class="balance-foot"><span>${used} used</span><span>${pending} pending</span></div>
     ${accruedLine}
+      ${advanceLine}
   </div>`;
 }
 
@@ -209,7 +213,7 @@ async function viewDashboard() {
   </div>`;
 
   html += `<div class="balance-grid">`;
-  html += balanceCard('Annual leave', '☀️', '#0090bd', d.balances.annual.entitlement, d.balances.annual.used, d.balances.annual.pending, d.balances.annual.available, d.balances.annual.accrued);
+  html += balanceCard('Annual leave', '☀️', '#0090bd', d.balances.annual.entitlement, d.balances.annual.used, d.balances.annual.pending, d.balances.annual.available, d.balances.annual.accrued, d.balances.annual.advanceTaken);
   html += balanceCard('Sick leave', '✚', '#dc2626', d.balances.sick.entitlement, d.balances.sick.used, d.balances.sick.pending, d.balances.sick.available);
   html += balanceCard('Family responsibility', '♥', '#d97706', d.balances.family.entitlement, d.balances.family.used, d.balances.family.pending, d.balances.family.available);
   html += `</div>`;
