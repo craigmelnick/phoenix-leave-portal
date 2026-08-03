@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth, requireDirector } = require('../middleware/auth');
-const { remainingDays, nowIso } = require('../helpers');
+const { remainingDays,accruedDays,  nowIso } = require('../helpers');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -82,6 +82,7 @@ router.get('/admin/entitlements', requireDirector, (req, res) => {
       name: u.name,
       department: departments.find((d) => d.id === u.dept_id)?.name || '—',
       entitlement: u.entitlement,
+      accrued: accruedDays(u),
       used: u.used,
       pending: u.pending,
       remaining: remainingDays(u),
