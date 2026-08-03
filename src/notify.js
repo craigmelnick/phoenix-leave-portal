@@ -3,6 +3,19 @@
 // oversight log entry even if they weren't one of the approvers. Mirrors the prototype's
 // notifyOnApproval() logic exactly, against the real database.
 
+// Fired the moment a request first needs a decision — either right after submission (approver 1)
+// or right after step 1 is approved (approver 2 / approver 3 pool). Without this, an approver has
+// no way of knowing a request is waiting on them until they happen to check the app.
+function notifyApprovalNeeded(request, employee, approverId) {
+    if (!approverId) return;
+    const dept = request.dept_id ? db.prepare('SELECT * FROM departments WHERE id = ?').get(request.dept_id) : null;
+    const dateRange = fmtDate(request.start_date) + (request.start_date !== request.end_date ? ' – ' + fmtDate(request.end_date) : '');
+    pushNotification(
+          approverId,
+          `${employee.name}${dept ? ' (' + dept.name + ')' : ''} has requested ${request.days} day(s) of ${request.type} leave, ${dateRange}, and it's waiting on your approval.`
+        );
+}
+
 const db = require('./db');
 const { fmtDate, getCeoId, nowIso } = require('./helpers');
 const { sendNotificationEmail } = require('./email');
@@ -43,4 +56,4 @@ function notifyOnApproval(request, employee) {
   }
 }
 
-module.exports = { pushNotification, notifyOnApproval };
+module.exports = { pushNotification, notifyOnApproval, notifyApprovalNeeded };
