@@ -1,12 +1,13 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth, requireDirector } = require('../middleware/auth');
-const { remainingDays,accruedDays,  nowIso } = require('../helpers');
+const { remainingDays, accruedDays, nowIso, statusLabel, fmtDate } = require('../helpers');
+const { pushNotification } = require('../notify');
 
 const router = express.Router();
 router.use(requireAuth);
 
-// ---- Approver assignments — CEO-only, both to view and to edit ----
+// ---- Approver assignments - CEO-only, both to view and to edit ----
 router.get('/admin/approvers', requireDirector, (req, res) => {
   const users = db.prepare(`SELECT * FROM users WHERE id != ? AND active=1 ORDER BY name`).all(req.user.id);
   const allUsers = db.prepare('SELECT id, name FROM users WHERE active=1 ORDER BY name').all();
@@ -15,6 +16,7 @@ router.get('/admin/approvers', requireDirector, (req, res) => {
     employees: users.map((u) => ({
       id: u.id,
       name: u.name,
+      role: u.role,
       approver1: u.approver1,
       approver2: u.approver2,
       approver3: u.approver3,
@@ -49,7 +51,7 @@ router.post('/admin/noticeboard', requireDirector, (req, res) => {
   res.json({ ok: true });
 });
 
-// ---- Company-wide reporting — visible to everyone, but never individual balances ----
+// ---- Company-wide reporting - visible to everyone, but never individual balances ----
 router.get('/admin/report', (req, res) => {
   const pendingCount = db.prepare(`SELECT COUNT(*) c FROM leave_requests WHERE status LIKE 'pending%'`).get().c;
   const approvedDays = db.prepare(`SELECT COALESCE(SUM(days),0) s FROM leave_requests WHERE status='approved'`).get().s;
@@ -72,7 +74,7 @@ router.get('/admin/report', (req, res) => {
   });
 });
 
-// ---- Employee entitlements — CEO-only (privacy: managers never see individual balances) ----
+// ---- Employee entitlements - CEO-only (privacy: managers never see individual balances) ----
 router.get('/admin/entitlements', requireDirector, (req, res) => {
   const users = db.prepare(`SELECT * FROM users WHERE dept_id IS NOT NULL AND active=1 ORDER BY name`).all();
   const departments = db.prepare('SELECT * FROM departments').all();
@@ -80,19 +82,19 @@ router.get('/admin/entitlements', requireDirector, (req, res) => {
     employees: users.map((u) => ({
       id: u.id,
       name: u.name,
-      department: departments.find((d) => d.id === u.dept_id)?.name || '—',
+      department: departments.find((d) => d.id === u.dept_id)?.name || '-',
       entitlement: u.entitlement,
       accrued: accruedDays(u),
       used: u.used,
       pending: u.pending,
       remaining: remainingDays(u),
       hireDate: u.hire_date,
-            contractMonths: u.contract_months,
+      contractMonths: u.contract_months,
     })),
   });
 });
 
-// ---- Employee management (CEO-only) — add / update someone on the roster ----
+// ---- Employee management (CEO-only) - add / update someone on the roster ----
 router.get('/admin/employees', requireDirector, (req, res) => {
   const users = db.prepare('SELECT * FROM users WHERE active=1 ORDER BY name').all();
   const departments = db.prepare('SELECT * FROM departments ORDER BY name').all();
@@ -105,19 +107,19 @@ router.post('/admin/employees', requireDirector, (req, res) => {
   const exists = db.prepare('SELECT id FROM users WHERE id=? OR lower(email)=?').get(id, String(email).toLowerCase());
   if (exists) return res.status(409).json({ error: 'An employee with that ID or email already exists.' });
   db.prepare(
-          `INSERT INTO users (id, name, email, dept_id, role, title, entitlement, used, pending, active, hire_date, contract_months)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 1, ?, ?)`
-        ).run(
-          id,
-          name,
-          String(email).toLowerCase(),
-          deptId || null,
-          role || 'staff',
-          title || null,
-          Number(entitlement) || 15,
-          hireDate || null,
-          contractMonths ? Number(contractMonths) : null
-        );
+    `INSERT INTO users (id, name, email, dept_id, role, title, entitlement, used, pending, active, hire_date, contract_months)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 1, ?, ?)`
+  ).run(
+    id,
+    name,
+    String(email).toLowerCase(),
+    deptId || null,
+    role || 'staff',
+    title || null,
+    Number(entitlement) || 15,
+    hireDate || null,
+    contractMonths ? Number(contractMonths) : null
+  );
   db.prepare('INSERT INTO audit_log (actor_id, actor_name, action, detail, at) VALUES (?, ?, ?, ?, ?)').run(
     req.user.id,
     req.user.name,
@@ -129,33 +131,85 @@ router.post('/admin/employees', requireDirector, (req, res) => {
 });
 
 router.put('/admin/employees/:id', requireDirector, (req, res) => {
-    const target = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
-    if (!target) return res.status(404).json({ error: 'Employee not found.' });
-    const { name, deptId, role, title, entitlement, active, hireDate, contractMonths } = req.body;
-    db.prepare(
-          `UPDATE users SET name=?, dept_id=?, role=?, title=?, entitlement=?, active=?, hire_date=?, contract_months=? WHERE id=?`
-        ).run(
-          name !== undefined ? name : target.name,
-          deptId !== undefined ? deptId : target.dept_id,
-          role !== undefined ? role : target.role,
-          title !== undefined ? title : target.title,
-          entitlement !== undefined ? Number(entitlement) : target.entitlement,
-          active !== undefined ? (active ? 1 : 0) : target.active,
-          hireDate !== undefined ? hireDate : target.hire_date,
-          contractMonths !== undefined ? (contractMonths ? Number(contractMonths) : null) : target.contract_months,
-          target.id
-        );
-    db.prepare('INSERT INTO audit_log (actor_id, actor_name, action, detail, at) VALUES (?, ?, ?, ?, ?)').run(
-          req.user.id,
-          req.user.name,
-          'employee_updated',
-          `Updated ${target.name}'s record` + (entitlement !== undefined ? ` — annual entitlement set to ${Number(entitlement)} day(s)` : ''),
-          nowIso()
-        );
-    res.json({ ok: true });
+  const target = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'Employee not found.' });
+  const { name, deptId, role, title, entitlement, active, hireDate, contractMonths } = req.body;
+  db.prepare(
+    `UPDATE users SET name=?, dept_id=?, role=?, title=?, entitlement=?, active=?, hire_date=?, contract_months=? WHERE id=?`
+  ).run(
+    name !== undefined ? name : target.name,
+    deptId !== undefined ? deptId : target.dept_id,
+    role !== undefined ? role : target.role,
+    title !== undefined ? title : target.title,
+    entitlement !== undefined ? Number(entitlement) : target.entitlement,
+    active !== undefined ? (active ? 1 : 0) : target.active,
+    hireDate !== undefined ? hireDate : target.hire_date,
+    contractMonths !== undefined ? (contractMonths ? Number(contractMonths) : null) : target.contract_months,
+    target.id
+  );
+  db.prepare('INSERT INTO audit_log (actor_id, actor_name, action, detail, at) VALUES (?, ?, ?, ?, ?)').run(
+    req.user.id,
+    req.user.name,
+    'employee_updated',
+    `Updated ${target.name}'s record` + (entitlement !== undefined ? ` - annual entitlement set to ${Number(entitlement)} day(s)` : '') + (role !== undefined ? ` - role set to ${role}` : ''),
+    nowIso()
+  );
+  res.json({ ok: true });
 });
 
-// ---- Manual leave-year rollover trigger (also runs automatically each 1 March — see cron in server.js) ----
+// ---- All leave requests (CEO-only) - lets the CEO see and cancel anyone's request, not just
+// the ones awaiting their own approval. ----
+router.get('/admin/leave-requests', requireDirector, (req, res) => {
+  const rows = db
+    .prepare(`SELECT * FROM leave_requests WHERE status IN ('pending_1','pending_2','approved') ORDER BY start_date DESC`)
+    .all();
+  const users = db.prepare('SELECT id, name FROM users').all();
+  res.json({
+    requests: rows.map((r) => ({
+      id: r.id,
+      employeeName: users.find((u) => u.id === r.employee_id)?.name || 'Unknown',
+      type: r.type,
+      start: r.start_date,
+      end: r.end_date,
+      days: r.days,
+      status: r.status,
+      statusLabel: statusLabel(r.status),
+    })),
+  });
+});
+
+// CEO cancels an employee's request outright (not an approve/reject decision). Any days already
+// counted as used or pending are added back to the employee's balance, and they're notified.
+router.post('/admin/leave-requests/:id/cancel', requireDirector, (req, res) => {
+  const r = db.prepare('SELECT * FROM leave_requests WHERE id=?').get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'Request not found.' });
+  if (!['pending_1', 'pending_2', 'approved'].includes(r.status)) {
+    return res.status(409).json({ error: 'This request can no longer be cancelled.' });
+  }
+  const employee = db.prepare('SELECT * FROM users WHERE id=?').get(r.employee_id);
+  const wasApproved = r.status === 'approved';
+  db.prepare(`UPDATE leave_requests SET status='cancelled' WHERE id=?`).run(r.id);
+  if (wasApproved) db.prepare('UPDATE users SET used = used - ? WHERE id=?').run(r.days, employee.id);
+  else db.prepare('UPDATE users SET pending = pending - ? WHERE id=?').run(r.days, employee.id);
+  db.prepare(`INSERT INTO approval_trail (request_id, by_user_id, by_name, action, at) VALUES (?, ?, ?, 'cancelled by admin', ?)`).run(
+    r.id,
+    req.user.id,
+    req.user.name,
+    nowIso()
+  );
+  db.prepare('INSERT INTO audit_log (actor_id, actor_name, action, detail, at) VALUES (?, ?, ?, ?, ?)').run(
+    req.user.id,
+    req.user.name,
+    'leave_request_admin_cancelled',
+    `Request #${r.id} for ${employee.name} cancelled by admin (${r.days} day(s) ${r.type})`,
+    nowIso()
+  );
+  const dateRange = fmtDate(r.start_date) + (r.start_date !== r.end_date ? ' - ' + fmtDate(r.end_date) : '');
+  pushNotification(employee.id, `${req.user.name} has removed your ${r.type} leave request for ${dateRange}.`);
+  res.json({ ok: true, status: 'cancelled' });
+});
+
+// ---- Manual leave-year rollover trigger (also runs automatically each 1 March - see cron in server.js) ----
 router.post('/admin/rollover-leave-year', requireDirector, (req, res) => {
   const users = db.prepare('SELECT * FROM users WHERE active=1').all();
   users.forEach((u) => {
