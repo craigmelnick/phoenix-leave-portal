@@ -141,4 +141,25 @@ addColumnIfMissing('users', 'hire_date TEXT');
 addColumnIfMissing('users', 'contract_months INTEGER');
 addColumnIfMissing('leave_requests', 'escalation_id INTEGER REFERENCES escalation_requests(id)');
 
+// One-off email corrections supplied by the CEO (Aug 2026). A few operations/warehouse staff
+// don't have individual company inboxes and share one with a colleague — a "+name" tag keeps
+// each row's email unique (required for login-by-email to resolve to the right person) while
+// mail for the whole group still lands in that one shared inbox. Matches on the old (wrong)
+// address, so once applied this is a no-op on every future boot.
+const emailCorrections = [
+    ['eseshibe@phoenixintl.co.za', 'vgovender+eunice@phoenixintl.co.za'],
+    ['ismith@phoenixintl.co.za', 'ian@phoenixintl.co.za'],
+    ['ichemwaita@phoenixintl.co.za', 'cmelnick+imagine@phoenixintl.co.za'],
+    ['jseshibe@phoenixintl.co.za', 'vgovender+joseph@phoenixintl.co.za'],
+    ['mndlovu@phoenixintl.co.za', 'vgovender+maxwell@phoenixintl.co.za'],
+    ['tnkuna@phoenixintl.co.za', 'vgovender+trevor@phoenixintl.co.za'],
+    ['tmelnick@phoenixintl.co.za', 'tristan@phoenixintl.co.za'],
+    ['wmkumbuzi@phoenixintl.co.za', 'vgovender+wilfred@phoenixintl.co.za'],
+  ];
+const updateEmail = db.prepare('UPDATE users SET email=? WHERE email=?');
+for (const [oldEmail, newEmail] of emailCorrections) {
+    updateEmail.run(newEmail, oldEmail);
+}
+db.prepare(`UPDATE users SET name='Marishka Darman' WHERE email='mdarman@phoenixintl.co.za' AND name != 'Marishka Darman'`).run();
+
 module.exports = db;
