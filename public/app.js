@@ -86,7 +86,7 @@ function renderLogin() {
 
 async function requestOtp() {
   const email = document.getElementById('loginName').value.trim();
-  if (!email) { document.getElementById('loginError').textContent = 'Please select your name.; return; }
+  if (!email) { document.getElementById('loginError').textContent = 'Please select your name.'; return; }
   try {
     const result = await api('/auth/request-otp', { method: 'POST', body: { email } });
     pendingEmail = email;
