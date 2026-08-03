@@ -14,7 +14,7 @@ const {
   statusLabel,
   nowIso,
 } = require('../helpers');
-const { notifyOnApproval } = require('../notify');
+const { notifyOnApproval, notifyApprovalNeeded } = require('../notify');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -192,6 +192,8 @@ router.post('/leave-requests', (req, res) => {
     notifyOnApproval(freshReq, user);
   } else {
     db.prepare('UPDATE users SET pending = pending + ? WHERE id = ?').run(days, user.id);
+        const freshReq = db.prepare('SELECT * FROM leave_requests WHERE id=?').get(reqId);
+        notifyApprovalNeeded(freshReq, user, user.approver1);
   }
 
   db.prepare('INSERT INTO audit_log (actor_id, actor_name, action, detail, at) VALUES (?, ?, ?, ?, ?)').run(
