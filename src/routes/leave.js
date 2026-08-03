@@ -6,6 +6,7 @@ const {
   isValidCalendarDate,
   businessDaysBetween,
   remainingDays,
+  accruedDays,
   stage2Pool,
   isAwaitingApproval,
   overlappingColleagues,
@@ -66,7 +67,7 @@ router.get('/dashboard', (req, res) => {
     firstName: user.name.split(' ')[0],
     heroLine,
     balances: {
-      annual: { label: 'Annual leave', entitlement: user.entitlement, used: user.used, pending: user.pending, available: remainingDays(user) },
+      annual: { label: 'Annual leave', entitlement: user.entitlement, accrued: accruedDays(user), used: user.used, pending: user.pending, available: remainingDays(user) },
       sick: { label: 'Sick leave', entitlement: 10, used: sick.used, pending: sick.pending, available: Math.max(0, 10 - sick.used - sick.pending) },
       family: { label: 'Family responsibility', entitlement: 3, used: fam.used, pending: fam.pending, available: Math.max(0, 3 - fam.used - fam.pending) },
     },
@@ -126,6 +127,8 @@ router.get('/leave-requests/preview', (req, res) => {
     flow,
     exceedsBalance: days > remainingDays(user),
     available: remainingDays(user),
+    accrued: accruedDays(user),
+        entitlement: user.entitlement,
     blocked: overlap.length > 0,
     overlapNames,
   });
@@ -150,6 +153,14 @@ router.post('/leave-requests', (req, res) => {
   }
 
   const days = businessDaysBetween(start, end);
+  // Hard block: annual leave can't be booked beyond what's actually been accrued so far this
+    // leave year (earned monthly in arrears) — enforced here, not just as a warning in the preview,
+    // so it can't be bypassed.
+    if (type === 'Annual' && days > remainingDays(user)) {
+          return res.status(409).json({
+                  error: `This request exceeds your accrued annual leave balance. You've earned ${accruedDays(user)} day(s) so far this leave year (${user.entitlement}/year, accrued monthly in arrears), minus ${user.used} used and ${user.pending} pending — ${remainingDays(user)} day(s) available.`,
+          });
+    }
   const status = user.approver1 ? 'pending_1' : 'approved';
 
   const info = db
