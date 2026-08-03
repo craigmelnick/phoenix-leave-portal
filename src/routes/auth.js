@@ -96,4 +96,11 @@ router.get('/me', (req, res) => {
   res.json({ user: publicUser(req.user) });
 });
 
+
+// Public roster for the sign-in dropdown — names and emails only, no leave data, so it's
+// safe to expose before anyone has signed in.
+router.get('/roster', (req, res) => {
+    const users = db.prepare('SELECT id, name, email FROM users WHERE active=1 ORDER BY name').all();
+    res.json({ users });
+});
 module.exports = router;
