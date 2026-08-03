@@ -41,22 +41,30 @@ function businessDaysBetween(startStr, endStr) {
     return count;
 }
 
-// Annual leave is earned monthly, in arrears — you must complete a full calendar month of the
-// leave year before that month's share is credited. A person on 15 days/year earns 15/12 = 1.25
-// days for each completed month; someone two complete months into the leave year has only
-// accrued 2.5 days, even though their annual entitlement is 15. Counts complete months elapsed
-// since the leave year started, capped at 12 (i.e. the full entitlement once the year is done).
-function monthsElapsedInArrears(asOf) {
-    const start = new Date(LEAVE_YEAR.start + 'T00:00:00');
-    const ref = asOf ? new Date(asOf) : new Date();
-    let months = (ref.getFullYear() - start.getFullYear()) * 12 + (ref.getMonth() - start.getMonth());
-    if (ref.getDate() < start.getDate()) months -= 1;
-    return Math.max(0, Math.min(12, months));
+// Annual leave is earned monthly, in arrears — you must complete a full calendar month before
+// that month's share is credited. A person on 15 days/year earns 15/12 = 1.25 days for each
+// completed month. The clock always resets to the leave year start (1 March) for everyone, but:
+//   - someone hired partway through the leave year only starts accruing from their hire date
+//     (true joining date, not 1 March) — so a new starter is correctly prorated;
+//   - someone on a fixed-term contract (e.g. 6 months at a time) stops accruing once their
+//     contract_months is reached, even if the leave year isn't over yet.
+// Counts complete months elapsed since max(leave year start, hire date), capped at 12 and at
+// contract_months when the employee is on a fixed-term contract.
+function monthsElapsedInArrears(user, asOf) {
+        const yearStart = new Date(LEAVE_YEAR.start + 'T00:00:00');
+        const hireDate = user && user.hire_date ? new Date(user.hire_date + 'T00:00:00') : null;
+        const start = hireDate && hireDate > yearStart ? hireDate : yearStart;
+        const ref = asOf ? new Date(asOf) : new Date();
+        let months = (ref.getFullYear() - start.getFullYear()) * 12 + (ref.getMonth() - start.getMonth());
+        if (ref.getDate() < start.getDate()) months -= 1;
+        months = Math.max(0, months);
+        const cap = user && user.contract_months ? Math.min(12, user.contract_months) : 12;
+        return Math.min(cap, months);
 }
 
 function accruedDays(user, asOf) {
-    const months = monthsElapsedInArrears(asOf);
-    return Math.round(((user.entitlement * months) / 12) * 100) / 100;
+        const months = monthsElapsedInArrears(user, asOf);
+        return Math.round(((user.entitlement * months) / 12) * 100) / 100;
 }
 
 // "Available" balance is based on what's actually been accrued so far this leave year (in
