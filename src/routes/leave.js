@@ -19,8 +19,9 @@ const {
   fmtDate,
   statusLabel,
   nowIso,
+  randomQuote,
 } = require('../helpers');
-const { notifyOnApproval, notifyApprovalNeeded } = require('../notify');
+const { notifyOnApproval, notifyApprovalNeeded, notifyEmployeeApproved } = require('../notify');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -126,6 +127,7 @@ router.get('/dashboard', (req, res) => {
     yearEndReminder: isYearEndWindow && remainingDays(user) > 0 ? remainingDays(user) : null,
     noticeboard: noticeboard ? noticeboard.value : '',
     upcoming: upcoming.map((r) => ({ id: r.id, type: r.type, start: r.start_date, end: r.end_date, days: r.days })),
+    quote: randomQuote(),
   });
 });
 
@@ -273,6 +275,7 @@ router.post('/leave-requests', (req, res) => {
     );
     const freshReq = db.prepare('SELECT * FROM leave_requests WHERE id=?').get(reqId);
     notifyOnApproval(freshReq, user);
+    notifyEmployeeApproved(freshReq, user);
   } else {
     db.prepare('UPDATE users SET pending = pending + ? WHERE id = ?').run(days, user.id);
     const freshReq = db.prepare('SELECT * FROM leave_requests WHERE id=?').get(reqId);
