@@ -140,6 +140,11 @@ function addColumnIfMissing(table, columnDef) {
 addColumnIfMissing('users', 'hire_date TEXT');
 addColumnIfMissing('users', 'contract_months INTEGER');
 addColumnIfMissing('leave_requests', 'escalation_id INTEGER REFERENCES escalation_requests(id)');
+// Tracks the last time each employee was sent a year-end forfeiture reminder (src/forfeiture.js).
+// NULL means "not reminded yet this leave year" — reset back to NULL for everyone by the same
+// 1 March rollover cron (server.js) that forfeits the unused balance, so the reminder cycle
+// starts fresh for the new leave year rather than staying permanently "already sent".
+addColumnIfMissing('users', 'forfeiture_reminder_sent_at TEXT');
 
 // One-off email corrections supplied by the CEO (Aug 2026). A few operations/warehouse staff
 // don't have individual company inboxes and share one with a colleague — a "+name" tag keeps
