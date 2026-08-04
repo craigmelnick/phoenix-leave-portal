@@ -8,6 +8,7 @@ const db = require('./db');
 const { seed } = require('./seed');
 const { attachUser } = require('./middleware/auth');
 const { remainingDays, nowIso } = require('./helpers');
+const { sendForfeitureReminders } = require('./forfeiture');
 
 const authRoutes = require('./routes/auth');
 const leaveRoutes = require('./routes/leave');
@@ -68,7 +69,17 @@ cron.schedule('5 0 1 3 *', () => {
     }
     db.prepare('UPDATE users SET used=0, pending=0 WHERE id=?').run(u.id);
   });
+  // Fresh leave year, fresh reminder cycle — without this, forfeiture_reminder_sent_at would stay
+  // set forever and nobody would ever be reminded again in future years.
+  db.prepare('UPDATE users SET forfeiture_reminder_sent_at=NULL').run();
   console.log(`Leave year rolled over for ${users.length} employees.`);
+});
+
+// Daily check (07:00 server time) for the year-end forfeiture reminder — a no-op outside
+// January/February, and a no-op for anyone already reminded this leave year (src/forfeiture.js).
+cron.schedule('0 7 * * *', () => {
+  const result = sendForfeitureReminders();
+  if (result.sent > 0) console.log(`Forfeiture reminders sent to ${result.sent} employee(s).`);
 });
 
 const PORT = process.env.PORT || 3000;
