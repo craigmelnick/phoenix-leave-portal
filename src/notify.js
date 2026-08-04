@@ -17,8 +17,8 @@ function notifyApprovalNeeded(request, employee, approverId) {
 }
 
 const db = require('./db');
-const { fmtDate, getCeoId, nowIso, randomQuote } = require('./helpers');
-const { sendNotificationEmail } = require('./email');
+const { fmtDate, getCeoId, nowIso, randomQuote, buildCertificateData, renderCertificateHtml } = require('./helpers');
+const { sendNotificationEmail, sendCertificateEmail } = require('./email');
 
 // Every notification always gets its in-app record (the bell icon), regardless of whether the
 // email send succeeds — so nobody misses something waiting on them just because SMTP hiccuped.
@@ -84,6 +84,35 @@ function notifyEmployeeApproved(request, employee) {
   const dateRange = fmtDate(request.start_date) + (request.start_date !== request.end_date ? ' – ' + fmtDate(request.end_date) : '');
   const message = `Good news, ${employee.name.split(' ')[0]} — your ${request.type} leave for ${dateRange} (${request.days} day(s)) has been approved. Thank you for all your hard work — enjoy your well-earned break! "${randomQuote()}"`;
   pushNotification(employee.id, message);
+  emailCertificate(request, employee);
+}
+
+// Emails the employee their leave certificate the moment their request is finally approved —
+// separate from the in-app "good news" notification above, since that one just needs to be
+// seen, while this is a proper keepsake document worth having in an inbox. Best-effort: a
+// failure here must never break the approval flow itself, so it's logged to the audit trail
+// (same pattern as pushNotification's own email failures) rather than thrown.
+function emailCertificate(request, employee) {
+  try {
+    const cert = buildCertificateData(request.id);
+    if (!cert) return;
+    const html = renderCertificateHtml(cert);
+    const text = `Your ${cert.type} leave certificate (${cert.refNo}) for ${cert.dateRange} is attached in this email. Approved by: ${cert.approvedBy}. Remaining balance: ${cert.remainingBalance} of ${cert.entitlement} day(s) this leave year.`;
+    sendCertificateEmail(employee.email, employee.name, `Your leave certificate — ${cert.refNo}`, html, text).catch((e) => {
+      console.error('Certificate email failed:', e.message);
+      try {
+        db.prepare('INSERT INTO audit_log (actor_id, actor_name, action, detail, at) VALUES (?, ?, ?, ?, ?)').run(
+          null,
+          'System',
+          'notification_email_failed',
+          `Certificate email to ${employee.name} (${employee.email}) could not be sent: ${e.message}`,
+          nowIso()
+        );
+      } catch (_) { /* best effort - never let logging break the request */ }
+    });
+  } catch (e) {
+    console.error('Certificate build failed:', e.message);
+  }
 }
 
 module.exports = { pushNotification, notifyOnApproval, notifyApprovalNeeded, notifyEmployeeApproved };
