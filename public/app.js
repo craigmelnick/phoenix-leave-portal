@@ -263,6 +263,9 @@ async function saveNoticeboard() {
 
 function viewRequest() {
   const todayIso = new Date().toISOString().slice(0, 10);
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowIso = tomorrow.toISOString().slice(0, 10);
   return `<div class="panel"><h2>Request leave <span class="hint">Business days only — weekends &amp; public holidays are excluded automatically</span></h2>
       <p style="margin:-8px 0 16px;font-size:13.5px;color:var(--ink);">Applicant: <b>${user.name}</b></p>
       <div class="form-grid">
@@ -276,7 +279,7 @@ function viewRequest() {
         <input type="date" id="reqStart" value="${todayIso}">
       </div>
       <div class="form-field"><label>End date <span class="hint">the day you return to work — e.g. the 16th to the 19th is 3 days off</span></label>
-        <input type="date" id="reqEnd" value="${todayIso}">
+        <input type="date" id="reqEnd" value="${tomorrowIso}">
       </div>
       <div class="form-field full"><label>Reason (optional)</label><textarea id="reqReason" rows="2" placeholder="e.g. family trip, medical appointment..."></textarea></div>
       <div class="form-field full" id="docField" style="display:none;">
@@ -490,7 +493,7 @@ function monthGrid(year, month, monthData, compact) {
     const info = (monthData && monthData.days && monthData.days[d]) || { isWeekend: false, isHoliday: false, entries: [] };
     html += `<div class="cal-cell ${compact ? 'compact' : ''} ${info.isWeekend ? 'weekend' : ''} ${info.isHoliday ? 'holiday' : ''}"><div class="daynum">${d}${(info.isHoliday && !compact) ? ' 🎌' : ''}</div>`;
     const typeColor = { Annual: '#0090bd', Sick: '#dc2626', Unpaid: '#64748b', 'Family Responsibility': '#d97706', 'Study Leave': '#7c3aed', Maternity: '#db2777', Paternity: '#16a34a' };
-    if (compact) {
+  if (compact) {
       html += `<div class="dot-wrap">`;
       info.entries.slice(0, 6).forEach((e) => {
         const color = e.status === 'approved' ? typeColor[e.type] : '#94a3b8';
@@ -564,7 +567,7 @@ async function viewNotifications() {
   let html = `<div class="panel"><h2>Notifications <span class="hint">Read-only — informational, no action required</span></h2>`;
   if (notifications.length === 0) { html += `<div class="empty">No notifications yet.</div>`; }
   else { notifications.forEach((n) => html += `<div class="notif-item"><div class="notif-dot"></div><div>${esc(n.text)}</div></div>`); }
-  html += `</div>`;
+  html+= `</div>`;
   return html;
 }
 
