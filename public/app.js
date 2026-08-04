@@ -211,6 +211,7 @@ async function viewDashboard() {
     <p class="hero-eyebrow">Phoenix International Logistics</p>
     <h2>Welcome, ${d.firstName}</h2>
     <p>${d.heroLine}</p>
+    ${d.quote ? `<p class="hero-quote" style="font-style:italic;opacity:.85;margin:6px 0 0;font-size:13.5px;">\u201c${d.quote}\u201d</p>` : ''}
     <button class="hero-btn" onclick="currentView='request'; render();">Request leave &nbsp;+</button>
   </div>`;
 
@@ -854,6 +855,74 @@ function viewIdeas() {
   return `<div class="panel"><h2>Feature ideas from other leave platforms <span class="hint">researched from BambooHR, Personio, Deputy, Factorial, AttendanceBot</span></h2>
     <ul class="feature-list">
       <li><b>Team availability / conflict warnings</b> — flags when teammates in the same department are already off during the requested dates.</li>
+      <li><b>Per-person approver assignment</b> — the CEO personally assigns up to three approvers for each employee.</li>
+      <li><b>Self-service balance &amp; history</b> — staff see entitlement, used, pending and remaining without asking HR.</li>
+      <li><b>Public holiday awareness</b> — requests auto-exclude weekends and public holidays from the day count.</li>
+      <li><b>Multiple leave types</b> — Annual, Sick, Family Responsibility, Study Leave, Maternity, Paternity, Unpaid, with a document upload for sick leave.</li>
+      <li><b>Email notifications</b> — approvers and the CEO get an email the moment a request needs them or gets decided.</li>
+      <li><b>Audit trail</b> — every approval step is timestamped and attributed; visible per request on My Requests.</li>
+      <li><b>Manager &amp; company-wide reporting</b> — approved days and open requests by department, without exposing individual balances.</li>
+      <li><b>Automatic year-end reminders</b> — a banner nudges staff every January/February who still have unused balance before it's forfeited.</li>
+      <li><b>Private balances</b> — only the CEO and the employee themselves can see that employee's exact leave balance.</li>
+      <li><b>Printable leave certificate</b> — a digital, downloadable confirmation of approved leave with remaining balance.</li>
+      <li><b>Real, persistent database</b> — every request, approval and notification is stored permanently, surviving restarts and giving a genuine audit record.</li>
+    </ul>
+  </div>`;
+}
+
+/* ---------------- Render ---------------- */
+
+const titles = { dashboard: 'Dashboard', request: 'Request leave', myrequests: 'My requests', approvals: 'Approvals', teamcal: 'Team calendar', notifications: 'Notifications', admin: 'Admin settings', audit: 'Audit log', ideas: 'Platform ideas', certificate: 'Leave certificate' };
+
+async function render() {
+  renderNav();
+  renderBottomNav();
+  renderBell();
+  renderTopbarMeta();
+  document.getElementById('pageTitle').textContent = titles[currentView] || 'Dashboard';
+  const content = document.getElementById('content');
+  content.innerHTML = '<div class="empty">Loading…</div>';
+  let html = '';
+  try {
+    if (currentView === 'dashboard') html = await viewDashboard();
+    else if (currentView === 'request') html = viewRequest();
+    else if (currentView === 'myrequests') html = await viewMyRequests();
+    else if (currentView === 'approvals') html = await viewApprovals();
+    else if (currentView === 'teamcal') html = await viewTeamCal();
+    else if (currentView === 'notifications') html = await viewNotifications();
+    else if (currentView === 'admin') html = user.role === 'director' ? await viewAdmin() : (currentView = 'dashboard', await viewDashboard());
+    else if (currentView === 'audit') html = user.role === 'director' ? await viewAuditLog() : (currentView = 'dashboard', await viewDashboard());
+    else if (currentView === 'ideas') html = viewIdeas();
+    else if (currentView === 'certificate') html = await viewCertificate();
+  } catch (e) {
+    html = `<div class="panel"><div class="empty">${e.message}</div></div>`;
+  }
+  content.innerHTML = html;
+
+  if (currentView === 'request') {
+    ['reqStart', 'reqEnd'].forEach((id) => {
+      document.getElementById(id).addEventListener('change', updateRequestPreview);
+    });
+    document.getElementById('reqType').addEventListener('change', () => { toggleDocField(); updateRequestPreview(); });
+    updateRequestPreview();
+  }
+}
+
+/* ---------------- Boot ---------------- */
+
+(async function boot() {
+  try {
+    const result = await api('/auth/me');
+    user = result.user;
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    render();
+  } catch (e) {
+try { const r = await api('/auth/roster'); roster = r.users || []; } catch (_) { roster = []; }
+         renderLogin();
+  }
+})();
+equested dates.</li>
       <li><b>Per-person approver assignment</b> — the CEO personally assigns up to three approvers for each employee.</li>
       <li><b>Self-service balance &amp; history</b> — staff see entitlement, used, pending and remaining without asking HR.</li>
       <li><b>Public holiday awareness</b> — requests auto-exclude weekends and public holidays from the day count.</li>
