@@ -642,6 +642,19 @@ async function viewAdmin() {
     });
     html += `</table></div></div>`;
 
+    const { departments: newEmpDepts } = await api('/admin/employees');
+    html += `<div class="panel"><h2>Add employee</h2><div class="form-grid">
+      <div class="form-field"><label>Employee ID</label><input id="newEmpId" placeholder="e.g. jsmith"></div>
+      <div class="form-field"><label>Full name</label><input id="newEmpName"></div>
+      <div class="form-field"><label>Email</label><input id="newEmpEmail" type="email"></div>
+      <div class="form-field"><label>Department</label><select id="newEmpDept"><option value="">—</option>${newEmpDepts.map((d) => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select></div>
+      <div class="form-field"><label>Title</label><input id="newEmpTitle"></div>
+      <div class="form-field"><label>Role</label><select id="newEmpRole"><option value="staff">Staff</option><option value="manager">Manager (approver)</option><option value="director">Admin (Director / CEO)</option></select></div>
+      <div class="form-field"><label>Annual entitlement (days)</label><input id="newEmpEnt" type="number" step="0.5" value="15"></div>
+      <div class="form-field"><label>Hire date</label><input id="newEmpHire" type="date"></div>
+      <div class="form-field"><label>Contract length (months, optional)</label><input id="newEmpContract" type="number"></div>
+    </div><button class="btn" style="margin-top:10px;" onclick="addEmployee()">Add employee</button></div>`;
+
     const { requests: allReqs } = await api('/admin/leave-requests');
     html += `<div class="panel"><h2>All leave requests <span class="hint">Cancel any request company-wide — the employee is notified automatically</span></h2>`;
     if (allReqs.length === 0) { html += `<div class="empty">No active leave requests.</div>`; }
@@ -1042,6 +1055,26 @@ async function decideDetailChange(id, action) {
     render();
   } catch (e) {
     alert(e.message || 'Could not update that request.');
+  }
+}
+
+
+async function addEmployee() {
+  const id = document.getElementById('newEmpId').value.trim();
+  const name = document.getElementById('newEmpName').value.trim();
+  const email = document.getElementById('newEmpEmail').value.trim();
+  const deptId = document.getElementById('newEmpDept').value || null;
+  const title = document.getElementById('newEmpTitle').value.trim() || null;
+  const role = document.getElementById('newEmpRole').value;
+  const entitlement = document.getElementById('newEmpEnt').value;
+  const hireDate = document.getElementById('newEmpHire').value || null;
+  const contractMonths = document.getElementById('newEmpContract').value || null;
+  if (!id || !name || !email) { alert('Employee ID, name and email are required.'); return; }
+  try {
+    await api('/admin/employees', { method: 'POST', body: { id, name, email, deptId, role, title, entitlement, hireDate, contractMonths } });
+    render();
+  } catch (e) {
+    alert(e.message || 'Could not add that employee.');
   }
 }
 
