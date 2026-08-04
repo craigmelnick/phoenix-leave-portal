@@ -146,6 +146,37 @@ addColumnIfMissing('leave_requests', 'escalation_id INTEGER REFERENCES escalatio
 // starts fresh for the new leave year rather than staying permanently "already sent".
 addColumnIfMissing('users', 'forfeiture_reminder_sent_at TEXT');
 
+// Employee self-service details (Employee Details page). Low-sensitivity fields (phone,
+// emergency contact, address) live directly on the users row and can be edited by the employee
+// at any time. ID number and banking details are deliberately NOT included here even though
+// they're stored the same way — those go through detail_change_requests below instead, since a
+// silently-changed bank account number is exactly the kind of thing payroll fraud looks like.
+addColumnIfMissing('users', 'phone TEXT');
+addColumnIfMissing('users', 'emergency_contact_name TEXT');
+addColumnIfMissing('users', 'emergency_contact_phone TEXT');
+addColumnIfMissing('users', 'address TEXT');
+addColumnIfMissing('users', 'id_number TEXT');
+addColumnIfMissing('users', 'bank_name TEXT');
+addColumnIfMissing('users', 'bank_account_number TEXT');
+addColumnIfMissing('users', 'bank_branch_code TEXT');
+
+// Queued changes to the sensitive fields above (ID number, banking) - nothing here is ever
+// applied to the users row until the CEO approves it (src/routes/details.js).
+db.exec(`
+CREATE TABLE IF NOT EXISTS detail_change_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id TEXT NOT NULL REFERENCES users(id),
+  field TEXT NOT NULL,
+  field_label TEXT NOT NULL,
+  old_value TEXT,
+  new_value TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  requested_at TEXT NOT NULL,
+  decided_at TEXT,
+  decided_by TEXT
+);
+`);
+
 // One-off email corrections supplied by the CEO (Aug 2026). A few operations/warehouse staff
 // don't have individual company inboxes and share one with a colleague — a "+name" tag keeps
 // each row's email unique (required for login-by-email to resolve to the right person) while
