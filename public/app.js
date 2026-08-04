@@ -134,6 +134,7 @@ function navItemsFor(u) {
   items.push({ id: 'teamcal', label: 'Team calendar' });
   items.push({ id: 'notifications', label: 'Notifications' });
   if (u.role === 'director') items.push({ id: 'admin', label: 'Admin settings' });
+  if (u.role === 'director') items.push({ id: 'audit', label: 'Audit log' });
   items.push({ id: 'ideas', label: 'Platform ideas' });
   return items;
 }
@@ -716,6 +717,50 @@ async function viewCertificate() {
   }
 }
 
+function auditActionLabel(action) {
+  const map = {
+    leave_request_submitted: 'Leave request submitted',
+    leave_request_step1_approved: 'Leave request approved (step 1)',
+    leave_request_approved: 'Leave request approved (final)',
+    leave_request_rejected: 'Leave request declined',
+    leave_request_cancelled: 'Leave request cancelled by employee',
+    leave_request_admin_cancelled: 'Leave request cancelled by admin',
+    leave_escalation_requested: 'Advance-leave escalation requested',
+    leave_escalation_approved: 'Advance-leave escalation approved',
+    leave_escalation_rejected: 'Advance-leave escalation declined',
+    leave_year_rollover: 'Leave year rollover (forfeiture)',
+    employee_added: 'Employee added',
+    employee_updated: 'Employee record updated',
+    approvers_updated: 'Approver chain updated',
+  };
+  return map[action] || action;
+}
+
+function fmtDateTime(iso) {
+  return new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+async function viewAuditLog() {
+  const { entries } = await api('/admin/audit-log');
+  let html = `<div class="panel"><h2>Audit log <span class="hint">Every leave decision and admin action across every account, most recent first</span></h2>`;
+  if (entries.length === 0) {
+    html += `<div class="empty">No audit activity yet.</div>`;
+  } else {
+    html += `<div class="table-scroll"><table><tr><th>When</th><th>Who</th><th>Action</th><th>Detail</th></tr>`;
+    entries.forEach((e) => {
+      html += `<tr>
+        <td style="white-space:nowrap;color:var(--muted);font-size:12px;">${fmtDateTime(e.at)}</td>
+        <td style="white-space:nowrap;">${avatarHtml(e.actor_name)}${e.actor_name}</td>
+        <td>${auditActionLabel(e.action)}</td>
+        <td style="color:var(--muted)">${e.detail}</td>
+      </tr>`;
+    });
+    html += `</table></div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
 function viewIdeas() {
   return `<div class="panel"><h2>Feature ideas from other leave platforms <span class="hint">researched from BambooHR, Personio, Deputy, Factorial, AttendanceBot</span></h2>
     <ul class="feature-list">
@@ -737,7 +782,7 @@ function viewIdeas() {
 
 /* ---------------- Render ---------------- */
 
-const titles = { dashboard: 'Dashboard', request: 'Request leave', myrequests: 'My requests', approvals: 'Approvals', teamcal: 'Team calendar', notifications: 'Notifications', admin: 'Admin settings', ideas: 'Platform ideas', certificate: 'Leave certificate' };
+const titles = { dashboard: 'Dashboard', request: 'Request leave', myrequests: 'My requests', approvals: 'Approvals', teamcal: 'Team calendar', notifications: 'Notifications', admin: 'Admin settings', audit: 'Audit log', ideas: 'Platform ideas', certificate: 'Leave certificate' };
 
 async function render() {
   renderNav();
@@ -756,6 +801,7 @@ async function render() {
     else if (currentView === 'teamcal') html = await viewTeamCal();
     else if (currentView === 'notifications') html = await viewNotifications();
     else if (currentView === 'admin') html = user.role === 'director' ? await viewAdmin() : (currentView = 'dashboard', await viewDashboard());
+    else if (currentView === 'audit') html = user.role === 'director' ? await viewAuditLog() : (currentView = 'dashboard', await viewDashboard());
     else if (currentView === 'ideas') html = viewIdeas();
     else if (currentView === 'certificate') html = await viewCertificate();
   } catch (e) {
