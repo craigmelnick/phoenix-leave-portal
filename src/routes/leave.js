@@ -35,12 +35,21 @@ function typeUsedPending(userId, type) {
 }
 
 // Balance for whichever leave type is actually being requested - Annual uses the accrual-based
-// entitlement on the user row (optionally projected forward to a future date), Sick and Family
-// Responsibility have their own fixed yearly pools, everything else (Study/Maternity/Paternity/
-// Unpaid) has no capped balance today.
+// entitlement on the user row, Sick and Family Responsibility have their own fixed yearly pools,
+// everything else (Study/Maternity/Paternity/Unpaid) has no capped balance today.
+//
+// For Annual, "asOfStart" being defined means this is a normal (not-beyond-the-advance-window)
+// request - in that case we use the same advance-inclusive balance shown on the employee's own
+// dashboard (remainingDaysAdvance), not just what's strictly accrued by the request's own start
+// date. Otherwise everyone would see a healthy balance on their dashboard but then get blocked or
+// shown a much smaller number the moment they actually tried to book against it, which is exactly
+// the confusion the advance-booking policy exists to avoid. "asOfStart" being undefined means this
+// is a beyond-window request being escalated instead - that path keeps showing the literal
+// accrued-to-date figure, since the advance allowance doesn't apply until the CEO approves it.
 function balanceForType(user, type, asOfStart) {
   if (type === 'Annual') {
-    return { entitlement: user.entitlement, used: user.used, pending: user.pending, available: remainingDaysAsOf(user, asOfStart) };
+    const available = asOfStart === undefined ? remainingDaysAsOf(user, undefined) : remainingDaysAdvance(user);
+    return { entitlement: user.entitlement, used: user.used, pending: user.pending, available };
   }
   if (type === 'Sick') {
     const tp = typeUsedPending(user.id, 'Sick');
