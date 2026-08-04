@@ -135,11 +135,24 @@ router.post('/admin/employees', requireDirector, (req, res) => {
 router.put('/admin/employees/:id', requireDirector, (req, res) => {
   const target = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
   if (!target) return res.status(404).json({ error: 'Employee not found.' });
-  const { name, deptId, role, title, entitlement, active, hireDate, contractMonths } = req.body;
+  const { name, email, deptId, role, title, entitlement, active, hireDate, contractMonths } = req.body;
+
+  // Email can be corrected here too (e.g. a typo'd address means that person can never receive
+  // their login code) - normalised the same way as when an employee is first added, and checked
+  // for clashes so two people can never end up sharing one login email.
+  let normalizedEmail = target.email;
+  if (email !== undefined) {
+    normalizedEmail = String(email).trim().toLowerCase();
+    if (!normalizedEmail) return res.status(400).json({ error: 'Email cannot be empty.' });
+    const clash = db.prepare('SELECT id FROM users WHERE lower(email)=? AND id != ?').get(normalizedEmail, target.id);
+    if (clash) return res.status(409).json({ error: 'Another employee already uses that email address.' });
+  }
+
   db.prepare(
-    `UPDATE users SET name=?, dept_id=?, role=?, title=?, entitlement=?, active=?, hire_date=?, contract_months=? WHERE id=?`
+    `UPDATE users SET name=?, email=?, dept_id=?, role=?, title=?, entitlement=?, active=?, hire_date=?, contract_months=? WHERE id=?`
   ).run(
     name !== undefined ? name : target.name,
+    normalizedEmail,
     deptId !== undefined ? deptId : target.dept_id,
     role !== undefined ? role : target.role,
     title !== undefined ? title : target.title,
@@ -153,7 +166,10 @@ router.put('/admin/employees/:id', requireDirector, (req, res) => {
     req.user.id,
     req.user.name,
     'employee_updated',
-    `Updated ${target.name}'s record` + (entitlement !== undefined ? ` - annual entitlement set to ${Number(entitlement)} day(s)` : '') + (role !== undefined ? ` - role set to ${role}` : ''),
+    `Updated ${target.name}'s record` +
+      (email !== undefined ? ` - email set to ${normalizedEmail}` : '') +
+      (entitlement !== undefined ? ` - annual entitlement set to ${Number(entitlement)} day(s)` : '') +
+      (role !== undefined ? ` - role set to ${role}` : ''),
     nowIso()
   );
   res.json({ ok: true });
