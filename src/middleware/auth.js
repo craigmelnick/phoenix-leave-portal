@@ -42,4 +42,15 @@ function requireDirector(req, res, next) {
   next();
 }
 
-module.exports = { SESSION_COOKIE, createSession, destroySession, attachUser, requireAuth, requireDirector };
+// Director or manager — used for the handful of things (like viewing, not editing, individual
+// leave balances) that department managers now also need, without opening up the full CEO-only
+// admin surface (approver assignments, roles, employee records, cancelling anyone's leave).
+function requireManagement(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'Not signed in.' });
+  if (req.user.role !== 'director' && req.user.role !== 'manager') {
+    return res.status(403).json({ error: 'Only the CEO or a manager can do this.' });
+  }
+  next();
+}
+
+module.exports = { SESSION_COOKIE, createSession, destroySession, attachUser, requireAuth, requireDirector, requireManagement };
