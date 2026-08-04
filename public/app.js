@@ -16,6 +16,7 @@ let dobConfirmed = false;
 let devOtp = null;
 let roster = [];
 let adminDirty = false;
+let profileIncomplete = false;
 
 /* ---------------- API helper ---------------- */
 
@@ -127,6 +128,7 @@ async function verifyOtp() {
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
     currentView = 'dashboard';
+    await checkProfileComplete();
     render();
   } catch (e) {
     document.getElementById('otpError').textContent = e.message;
@@ -147,6 +149,17 @@ async function logout() {
   renderLogin();
 }
 
+async function reportBug() {
+  const desc = prompt("Describe the bug or issue you're seeing \u2014 this goes straight to Craig.");
+  if (!desc || !desc.trim()) return;
+  try {
+    await api('/bugs/report', { method: 'POST', body: { description: desc.trim(), page: currentView } });
+    alert('Thanks \u2014 your report has been sent to Craig.');
+  } catch (e) {
+    alert(e.message || 'Could not send your bug report. Please try again.');
+  }
+}
+
 /* ---------------- Nav ---------------- */
 
 function navItemsFor(u) {
@@ -161,7 +174,8 @@ function navItemsFor(u) {
   items.push({ id: 'notifications', label: 'Notifications' });
   if (u.role === 'director' || u.role === 'manager') items.push({ id: 'admin', label: 'Admin settings' });
   if (u.role === 'director') items.push({ id: 'audit', label: 'Audit log' });
-  items.push({ id: 'ideas', label: 'Platform ideas' });
+  if (u.role === 'director') items.push({ id: 'ideas', label: 'Platform ideas' });
+  if (profileIncomplete) return items.filter((i) => i.id === 'details');
   return items;
 }
 
@@ -965,6 +979,7 @@ function viewIdeas() {
 const titles = { dashboard: 'Dashboard', request: 'Request leave', myrequests: 'My requests', details: 'My details', approvals: 'Approvals', teamcal: 'Team calendar', notifications: 'Notifications', admin: 'Admin settings', audit: 'Audit log', ideas: 'Platform ideas', certificate: 'Leave certificate' };
 
 async function render() {
+  if (profileIncomplete && currentView !== 'details') currentView = 'details';
   renderNav();
   renderBottomNav();
   renderBell();
@@ -983,7 +998,7 @@ async function render() {
     else if (currentView === 'admin') html = (user.role === 'director' || user.role === 'manager') ? await viewAdmin() : (currentView = 'dashboard', await viewDashboard());
     else if (currentView === 'details') html = await viewDetails();
     else if (currentView === 'audit') html = user.role === 'director' ? await viewAuditLog() : (currentView = 'dashboard', await viewDashboard());
-    else if (currentView === 'ideas') html = viewIdeas();
+    else if (currentView === 'ideas') html = user.role === 'director' ? viewIdeas() : (currentView = 'dashboard', await viewDashboard());
     else if (currentView === 'certificate') html = await viewCertificate();
   } catch (e) {
     html = `<div class="panel"><div class="empty">${e.message}</div></div>`;
@@ -1015,7 +1030,7 @@ async function viewDetails() {
   const pendingByField = {};
   mine.requests.filter((r) => r.status === 'pending').forEach((r) => { pendingByField[r.field] = r; });
 
-  let html = '<div class="panel"><h2>My contact details</h2><p class="hint" style="margin:4px 0 10px;">These update immediately — no approval needed.</p><div class="form-grid">';
+  let html = (profileIncomplete ? '<div class="panel" style="border-left:4px solid var(--red);"><h2 style="margin-top:0;">Please complete your profile</h2><p class="hint" style="margin:0;">Fill in your phone number, emergency contact and address below to continue using the portal.</p></div>' : '') + '<div class="panel"><h2>My contact details</h2><p class="hint" style="margin:4px 0 10px;">These update immediately — no approval needed.</p><div class="form-grid">';
   html += `<div class="form-field"><label>Phone</label><input id="det_phone" value="${esc(me.phone)}"></div>`;
   html += `<div class="form-field"><label>Emergency contact name</label><input id="det_ecn" value="${esc(me.emergencyContactName)}"></div>`;
   html += `<div class="form-field"><label>Emergency contact phone</label><input id="det_ecp" value="${esc(me.emergencyContactPhone)}"></div>`;
@@ -1054,6 +1069,7 @@ async function saveMyDetails() {
   const address = document.getElementById('det_addr').value.trim();
   try {
     await api('/details/me', { method: 'POST', body: { phone, emergencyContactName, emergencyContactPhone, address } });
+    if (profileIncomplete) { await checkProfileComplete(); if (!profileIncomplete) currentView = 'dashboard'; }
     render();
   } catch (e) {
     alert(e.message || 'Could not save your details.');
@@ -1115,6 +1131,14 @@ async function terminateEmployee(id, name) {
   }
 }
 
+async function checkProfileComplete() {
+  if (user.role === 'director') { profileIncomplete = false; return; }
+  try {
+    const me = await api('/details/me');
+    profileIncomplete = !(me.phone && me.emergencyContactName && me.emergencyContactPhone && me.address);
+  } catch (e) { profileIncomplete = false; }
+}
+
 /* ---------------- Boot ---------------- */
 
 (async function boot() {
@@ -1123,6 +1147,7 @@ async function terminateEmployee(id, name) {
     user = result.user;
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
+    await checkProfileComplete();
     render();
   } catch (e) {
 try { const r = await api('/auth/roster'); roster = r.users || []; } catch (_) { roster = []; }
