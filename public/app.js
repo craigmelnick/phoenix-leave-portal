@@ -220,7 +220,7 @@ async function viewDashboard() {
     <p class="hero-eyebrow">Phoenix International Logistics</p>
     <h2>Welcome, ${d.firstName}</h2>
     <p>${d.heroLine}</p>
-    ${d.quote ? `<p class="hero-quote" style="font-style:italic;opacity:.85;margin:6px 0 0;font-size:13.5px;">\u201c${d.quote}\u201d</p>` : ''}
+    ${d.quote ? `<p class="hero-quote" style="font-style:italic;opacity:.85;margin:6px 0 18px;font-size:13.5px;">\u201c${d.quote}\u201d</p>` : ''}
     <button class="hero-btn" onclick="currentView='request'; render();">Request leave &nbsp;+</button>
   </div>`;
 
