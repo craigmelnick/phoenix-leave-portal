@@ -56,6 +56,30 @@ function getHolidays() {
   return db.prepare('SELECT date FROM holidays').all().map((r) => r.date);
 }
 
+// Sick leave that butts right up against a weekend or public holiday (e.g. calling in sick on
+// a Monday, or the Friday before a long weekend) is exactly the pattern a doctor's-note policy
+// exists to discourage — it's the same day count either way, but it's the shape most likely to
+// just be an extended break. "Adjacent" means the day immediately before the leave starts, or
+// the day immediately after it ends (the return-to-work day itself, since end is exclusive), is
+// a Saturday, Sunday, or public holiday. Applies however many days the request spans.
+function isAdjacentToWeekendOrHoliday(startIso, endIso) {
+  const holidays = getHolidays();
+  function isWeekendOrHoliday(d) {
+    const day = d.getDay();
+    return day === 0 || day === 6 || holidays.includes(toLocalIso(d));
+  }
+  const dayBeforeStart = new Date(startIso + 'T00:00:00');
+  dayBeforeStart.setDate(dayBeforeStart.getDate() - 1);
+  const returnDay = new Date(endIso + 'T00:00:00'); // end is exclusive — this is the day right after the last day of leave
+  return isWeekendOrHoliday(dayBeforeStart) || isWeekendOrHoliday(returnDay);
+}
+
+// Sick leave only needs a doctor's note when it's adjacent to a weekend/holiday — routine sick
+// days in the middle of a normal week don't require one.
+function isSickNoteRequired(startIso, endIso) {
+  return isAdjacentToWeekendOrHoliday(startIso, endIso);
+}
+
 // End date is the day the employee is BACK at work, not a day of leave — so the range counted
 // is [start, end), i.e. up to but not including the end date. A request from the 16th to the
 // 19th is 3 leave days (16th, 17th, 18th), returning to work on the 19th.
@@ -250,6 +274,8 @@ module.exports = {
   toLocalIso,
   isValidCalendarDate,
   getHolidays,
+  isAdjacentToWeekendOrHoliday,
+  isSickNoteRequired,
   businessDaysBetween,
   roundHalf,
   floorHalf,
