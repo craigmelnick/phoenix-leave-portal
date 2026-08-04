@@ -160,6 +160,16 @@ addColumnIfMissing('users', 'bank_name TEXT');
 addColumnIfMissing('users', 'bank_account_number TEXT');
 addColumnIfMissing('users', 'bank_branch_code TEXT');
 
+// Termination / offboarding (task: employee termination workflow with payout logic). Terminated
+// employees are soft-deleted (active=0, same pattern used everywhere else in this app) rather than
+// hard-deleted, so their historical leave records stay intact for reporting and audit purposes.
+// payout_days is a snapshot of accrued-but-unused annual leave at the moment of termination - the
+// number of days that need to be paid out - captured at termination time so it doesn't silently
+// change later if accrual logic or the leave year rolls over.
+addColumnIfMissing('users', 'terminated_at TEXT');
+addColumnIfMissing('users', 'termination_reason TEXT');
+addColumnIfMissing('users', 'payout_days REAL');
+
 // Queued changes to the sensitive fields above (ID number, banking) - nothing here is ever
 // applied to the users row until the CEO approves it (src/routes/details.js).
 db.exec(`
