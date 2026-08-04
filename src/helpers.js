@@ -47,8 +47,19 @@ function businessDaysBetween(startStr, endStr) {
 // Leave-day figures are only ever shown to the half-day, never finer — rounds to the nearest
 // 0.5 rather than leaving arbitrary two-decimal fractions (like 8.33 or 7.29, which fall
 // straight out of entitlement/12 monthly accrual math) on screen or in balance checks.
+// Used for direct data-entry figures (e.g. an admin typing in an annual entitlement), where
+// "nearest" is the intuitive behaviour and there's no earned/unearned distinction to protect.
 function roundHalf(n) {
   return Math.round(n * 2) / 2;
+}
+
+// Same half-day grid, but always rounds DOWN. Used anywhere a figure represents what someone
+// has actually earned so far (accrued days, and anything derived from it, like remaining
+// balance) — rounding those to the *nearest* half instead of down could round e.g. a true
+// accrual of 8.75 days up to 9, letting someone book a whole extra day they have not actually
+// earned yet. Flooring guarantees the half-day-only display rule never overstates entitlement.
+function floorHalf(n) {
+  return Math.floor(n * 2) / 2;
 }
 
 // Annual leave is earned monthly, in arrears — you must complete a full calendar month before
@@ -72,16 +83,19 @@ function monthsElapsedInArrears(user, asOf) {
   return Math.min(cap, months);
 }
 
+// Floored to the half-day (never rounded up) — this is the figure every balance check is built
+// on, so it must never overstate what has actually been earned.
 function accruedDays(user, asOf) {
   const months = monthsElapsedInArrears(user, asOf);
-  return roundHalf((user.entitlement * months) / 12);
+  return floorHalf((user.entitlement * months) / 12);
 }
 
 // "Available" balance is based on what's actually been accrued so far this leave year (in
 // arrears), not the full annual entitlement — matches the real company policy: you can't book
-// leave you haven't earned yet.
+// leave you haven't earned yet. Floored (not rounded) so a partial half-day from the accrual
+// or used/pending figures can never tip someone's available balance above what they've earned.
 function remainingDays(user) {
-  return roundHalf(accruedDays(user) - user.used - user.pending);
+  return floorHalf(accruedDays(user) - user.used - user.pending);
 }
 
 // How far ahead someone is allowed to book leave in the normal flow before it needs management
@@ -110,9 +124,11 @@ function isBeyondAdvanceWindow(startIso, asOf) {
 
 // Same idea as remainingDays(), but projected forward to a future date — lets someone book
 // annual leave they haven't earned yet today, as long as they will have earned it by the time
-// the leave actually starts (and it's within the advance window above).
+// the leave actually starts (and it's within the advance window above). Floored for the same
+// reason as remainingDays(): this feeds the actual balance-exceeded check on submission, so it
+// must never show/allow more than what will truly be earned by that date.
 function remainingDaysAsOf(user, asOfIso) {
-  return roundHalf(accruedDays(user, asOfIso) - user.used - user.pending);
+  return floorHalf(accruedDays(user, asOfIso) - user.used - user.pending);
 }
 
 // The headline "available to book right now" balance, including the advance-booking window —
@@ -127,7 +143,10 @@ function remainingDaysAdvance(user) {
 
 // How many days someone has already taken/approved+pending beyond what they've actually earned
 // as of today — the exposure HR would need to claw back from a final salary if they resigned
-// right now. Zero once accrual catches up.
+// right now. Zero once accrual catches up. Rounded (not floored) here on purpose: accruedDays()
+// is already floored down, so this exposure figure is already conservative (equal to or larger
+// than the true overage) — rounding the remainder to the nearest half just keeps the number
+// itself on the half-day grid without needing to floor twice.
 function advanceDaysTaken(user) {
   return Math.max(0, roundHalf(user.used + user.pending - accruedDays(user)));
 }
@@ -201,6 +220,7 @@ module.exports = {
   getHolidays,
   businessDaysBetween,
   roundHalf,
+  floorHalf,
   remainingDays,
   accruedDays,
   advanceWindowCutoff,
