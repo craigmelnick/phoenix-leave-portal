@@ -2,7 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { isAwaitingApproval, stage2Pool, fmtDate, statusLabel, nowIso } = require('../helpers');
-const { notifyOnApproval, notifyApprovalNeeded } = require('../notify');
+const { notifyOnApproval, notifyApprovalNeeded, notifyEmployeeApproved } = require('../notify');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -106,6 +106,7 @@ function handleDecision(req, res, action) {
     const freshReq = db.prepare('SELECT * FROM leave_requests WHERE id=?').get(r.id);
     const freshEmployee = db.prepare('SELECT * FROM users WHERE id=?').get(employee.id);
     notifyOnApproval(freshReq, freshEmployee);
+    notifyEmployeeApproved(freshReq, freshEmployee);
     return res.json({ ok: true, status: 'approved' });
   }
 }
