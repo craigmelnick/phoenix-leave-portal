@@ -138,6 +138,7 @@ function navItemsFor(u) {
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'request', label: 'Request leave' },
     { id: 'myrequests', label: 'My requests' },
+    { id: 'details', label: 'My details' },
   ];
   if (u.isApprover || u.role === 'director') items.push({ id: 'approvals', label: 'Approvals' });
   items.push({ id: 'teamcal', label: 'Team calendar' });
@@ -602,6 +603,12 @@ async function viewAdmin() {
   let html = '';
 
   if (user.role === 'director') {
+    const { requests: pendingDetailRequests } = await api('/details/change-requests/pending').catch(() => ({ requests: [] }));
+    if (pendingDetailRequests.length) {
+      html += `<div class="panel"><h2>Pending ID & banking detail changes</h2><p class="hint" style="margin:4px 0 10px;">These changes only take effect once you approve them.</p><div class="table-scroll"><table><tr><th>Employee</th><th>Field</th><th>Current</th><th>Requested</th><th>Requested on</th><th></th></tr>` +
+        pendingDetailRequests.map((r) => `<tr><td>${avatarHtml(r.employeeName)}${esc(r.employeeName)}</td><td>${esc(r.field_label)}</td><td>${esc(r.old_value || '—')}</td><td><b>${esc(r.new_value)}</b></td><td>${fmtDateTime(r.requested_at)}</td><td><button class="btn" style="padding:4px 10px;font-size:13px;" onclick="decideDetailChange(${r.id},'approve')">Approve</button> <button class="btn" style="padding:4px 10px;font-size:13px;background:var(--danger,#c0392b);margin-left:6px;" onclick="decideDetailChange(${r.id},'reject')">Reject</button></td></tr>`).join('') +
+        `</table></div></div>`;
+    }
     html += `<div class="panel" id="adminSaveBar" style="position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
       <span style="font-size:13px;color:var(--muted);" id="adminDirtyLabel">All changes saved.</span>
       <button class="btn" id="adminSaveBtn" onclick="manualSaveAdmin()">Save changes</button>
@@ -905,7 +912,7 @@ function viewIdeas() {
 
 /* ---------------- Render ---------------- */
 
-const titles = { dashboard: 'Dashboard', request: 'Request leave', myrequests: 'My requests', approvals: 'Approvals', teamcal: 'Team calendar', notifications: 'Notifications', admin: 'Admin settings', audit: 'Audit log', ideas: 'Platform ideas', certificate: 'Leave certificate' };
+const titles = { dashboard: 'Dashboard', request: 'Request leave', myrequests: 'My requests', details: 'My details', approvals: 'Approvals', teamcal: 'Team calendar', notifications: 'Notifications', admin: 'Admin settings', audit: 'Audit log', ideas: 'Platform ideas', certificate: 'Leave certificate' };
 
 async function render() {
   renderNav();
@@ -924,6 +931,7 @@ async function render() {
     else if (currentView === 'teamcal') html = await viewTeamCal();
     else if (currentView === 'notifications') html = await viewNotifications();
     else if (currentView === 'admin') html = (user.role === 'director' || user.role === 'manager') ? await viewAdmin() : (currentView = 'dashboard', await viewDashboard());
+    else if (currentView === 'details') html = await viewDetails();
     else if (currentView === 'audit') html = user.role === 'director' ? await viewAuditLog() : (currentView = 'dashboard', await viewDashboard());
     else if (currentView === 'ideas') html = viewIdeas();
     else if (currentView === 'certificate') html = await viewCertificate();
@@ -938,6 +946,88 @@ async function render() {
     });
     document.getElementById('reqType').addEventListener('change', () => { toggleDocField(); updateRequestPreview(); });
     updateRequestPreview();
+  }
+}
+
+
+async function viewDetails() {
+  const [me, mine] = await Promise.all([
+    api('/details/me'),
+    api('/details/change-requests/mine'),
+  ]);
+  const sensitiveLabels = {
+    idNumber: 'ID / passport number',
+    bankName: 'Bank name',
+    bankAccountNumber: 'Bank account number',
+    bankBranchCode: 'Bank branch code',
+  };
+  const sensitiveFieldKeys = { idNumber: 'id_number', bankName: 'bank_name', bankAccountNumber: 'bank_account_number', bankBranchCode: 'bank_branch_code' };
+  const pendingByField = {};
+  mine.requests.filter((r) => r.status === 'pending').forEach((r) => { pendingByField[r.field] = r; });
+
+  let html = '<div class="panel"><h2>My contact details</h2><p class="hint" style="margin:4px 0 10px;">These update immediately — no approval needed.</p><div class="form-grid">';
+  html += `<div class="form-field"><label>Phone</label><input id="det_phone" value="${esc(me.phone)}"></div>`;
+  html += `<div class="form-field"><label>Emergency contact name</label><input id="det_ecn" value="${esc(me.emergencyContactName)}"></div>`;
+  html += `<div class="form-field"><label>Emergency contact phone</label><input id="det_ecp" value="${esc(me.emergencyContactPhone)}"></div>`;
+  html += `<div class="form-field"><label>Address</label><input id="det_addr" value="${esc(me.address)}"></div>`;
+  html += '</div><button class="btn" style="margin-top:10px;" onclick="saveMyDetails()">Save contact details</button></div>';
+
+  html += '<div class="panel"><h2>ID &amp; banking details</h2><p class="hint" style="margin:4px 0 10px;">Changes to these fields need CEO approval before they take effect, to protect against payroll fraud.</p><div class="form-grid">';
+  Object.keys(sensitiveLabels).forEach((key) => {
+    const fieldKey = sensitiveFieldKeys[key];
+    const pending = pendingByField[fieldKey];
+    html += `<div class="form-field"><label>${sensitiveLabels[key]}</label><div>${esc(me[key]) || '<span class="hint">Not set</span>'}</div>`;
+    if (pending) {
+      html += `<div class="hint">Pending approval: ${esc(pending.new_value)}</div>`;
+    } else {
+      html += `<div style="display:flex;gap:6px;margin-top:4px;"><input id="det_req_${fieldKey}" placeholder="New value"><button class="btn" style="padding:6px 10px;font-size:13px;" onclick="requestDetailChange('${fieldKey}')">Request change</button></div>`;
+    }
+    html += '</div>';
+  });
+  html += '</div></div>';
+
+  const history = mine.requests.filter((r) => r.status !== 'pending');
+  if (history.length) {
+    html += '<div class="panel"><h2>Change request history</h2><div class="table-scroll"><table><tr><th>Field</th><th>Requested</th><th>Status</th><th>Decided</th></tr>';
+    history.forEach((r) => {
+      html += `<tr><td>${esc(r.field_label)}</td><td>${esc(r.new_value)}</td><td class="pill">${esc(r.status)}</td><td>${r.decided_at ? fmtDateTime(r.decided_at) : '—'}</td></tr>`;
+    });
+    html += '</table></div></div>';
+  }
+  return html;
+}
+
+async function saveMyDetails() {
+  const phone = document.getElementById('det_phone').value.trim();
+  const emergencyContactName = document.getElementById('det_ecn').value.trim();
+  const emergencyContactPhone = document.getElementById('det_ecp').value.trim();
+  const address = document.getElementById('det_addr').value.trim();
+  try {
+    await api('/details/me', { method: 'POST', body: { phone, emergencyContactName, emergencyContactPhone, address } });
+    render();
+  } catch (e) {
+    alert(e.message || 'Could not save your details.');
+  }
+}
+
+async function requestDetailChange(field) {
+  const input = document.getElementById('det_req_' + field);
+  const newValue = input ? input.value.trim() : '';
+  if (!newValue) { alert('Please enter a value first.'); return; }
+  try {
+    await api('/details/change-request', { method: 'POST', body: { field, newValue } });
+    render();
+  } catch (e) {
+    alert(e.message || 'Could not submit that request.');
+  }
+}
+
+async function decideDetailChange(id, action) {
+  try {
+    await api(`/details/change-requests/${id}/${action}`, { method: 'POST' });
+    render();
+  } catch (e) {
+    alert(e.message || 'Could not update that request.');
   }
 }
 
