@@ -178,7 +178,7 @@ router.put('/admin/employees/:id', requireDirector, (req, res) => {
 
 // ---- All leave requests (CEO-only) - lets the CEO see and cancel anyone's request, not just
 // the ones awaiting their own approval. ----
-router.get('/admin/leave-requests', requireDirector, (req, res) => {
+router.get('/admin/leave-requests', requireManagement, (req, res) => {
   const rows = db
     .prepare(`SELECT * FROM leave_requests WHERE status IN ('pending_1','pending_2','approved') ORDER BY start_date DESC`)
     .all();
