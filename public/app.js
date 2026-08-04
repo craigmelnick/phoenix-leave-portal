@@ -672,6 +672,20 @@ async function viewAdmin() {
   });
   html += `</table></div></div>`;
 
+  if (user.role === 'manager') {
+    const { requests: allReqsForManager } = await api('/admin/leave-requests');
+    html += `<div class="panel"><h2>All leave requests <span class="hint">View only — the CEO can cancel a request</span></h2>`;
+    if (allReqsForManager.length === 0) { html += `<div class="empty">No active leave requests.</div>`; }
+    else {
+      html += `<div class="table-scroll"><table><tr><th>Employee</th><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Status</th></tr>`;
+      allReqsForManager.forEach((r) => {
+        html += `<tr><td>${avatarHtml(r.employeeName)}${r.employeeName}</td><td>${r.type}</td><td>${fmtDate(r.start)}</td><td>${fmtDate(r.end)}</td><td>${r.days}</td><td><span class="pill ${r.status}">${r.statusLabel}</span></td></tr>`;
+      });
+      html += `</table></div>`;
+    }
+    html += `</div>`;
+  }
+
   if (user.role === 'director' || user.role === 'manager') {
     const { employees } = await api('/admin/entitlements');
     const canEditEntitlements = user.role === 'director';
