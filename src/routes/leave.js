@@ -21,6 +21,7 @@ const {
   statusLabel,
   nowIso,
   randomQuote,
+  buildCertificateData,
 } = require('../helpers');
 const { notifyOnApproval, notifyApprovalNeeded, notifyEmployeeApproved } = require('../notify');
 
@@ -333,29 +334,18 @@ router.post('/leave-requests/:id/cancel', (req, res) => {
   res.json({ ok: true, status: 'cancelled' });
 });
 
+// Uses the same buildCertificateData() the auto-email on approval uses (src/helpers.js), so the
+// certificate you can view/print in the app and the one emailed to you the moment your leave was
+// approved always show exactly the same numbers.
 router.get('/leave-requests/:id/certificate', (req, res) => {
   const r = db.prepare('SELECT * FROM leave_requests WHERE id=?').get(req.params.id);
   if (!r || r.status !== 'approved') return res.status(404).json({ error: 'Certificate not available for this request.' });
-  const employee = db.prepare('SELECT * FROM users WHERE id=?').get(r.employee_id);
-  if (req.user.id !== employee.id && req.user.role !== 'director') {
+  if (req.user.id !== r.employee_id && req.user.role !== 'director') {
     return res.status(403).json({ error: 'Not authorised to view this certificate.' });
   }
-  const dept = r.dept_id ? db.prepare('SELECT * FROM departments WHERE id=?').get(r.dept_id) : null;
-  const trail = db.prepare('SELECT * FROM approval_trail WHERE request_id=?').all(r.id);
-  const approvals = trail.filter((t) => t.action.indexOf('approved') === 0).map((t) => t.by_name);
-  res.json({
-    refNo: 'PHX-' + String(r.id).padStart(5, '0'),
-    issuedDate: fmtDate(new Date().toISOString().slice(0, 10)),
-    employeeName: employee.name,
-    department: dept ? dept.name : '-',
-    type: r.type,
-    dateRange: fmtDate(r.start_date) + (r.start_date !== r.end_date ? ' - ' + fmtDate(r.end_date) : ''),
-    days: r.days,
-    approvedBy: approvals.length ? approvals.join(', ') : 'Auto-approved',
-    remainingBalance: remainingDays(employee),
-    entitlement: employee.entitlement,
-    leaveYear: LEAVE_YEAR,
-  });
+  const cert = buildCertificateData(r.id);
+  if (!cert) return res.status(404).json({ error: 'Certificate not available for this request.' });
+  res.json(cert);
 });
 
 module.exports = router;
