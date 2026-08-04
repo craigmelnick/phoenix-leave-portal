@@ -55,4 +55,24 @@ async function sendNotificationEmail(toEmail, subject, text) {
   return { devMode: false };
 }
 
-module.exports = { sendOtpEmail, sendNotificationEmail };
+// Sends the approved-leave certificate as a proper HTML email (the plain-text notification sent
+// alongside this one is enough to alert someone; this is the keepsake copy). Falls back to the
+// same dev-console logging as the other senders when SMTP isn't configured, so local/dev testing
+// never silently drops the certificate — it just prints a marker instead of the full HTML.
+async function sendCertificateEmail(toEmail, employeeName, subject, html, text) {
+  const t = getTransporter();
+  if (!t) {
+    console.log(`[DEV EMAIL FALLBACK] To: ${toEmail} — Subject: ${subject} — (certificate HTML email, ${html.length} chars)`);
+    return { devMode: true };
+  }
+  await t.sendMail({
+    from: process.env.FROM_EMAIL || 'Phoenix Leave Portal <no-reply@phoenixintl.co.za>',
+    to: toEmail,
+    subject,
+    text,
+    html,
+  });
+  return { devMode: false };
+}
+
+module.exports = { sendOtpEmail, sendNotificationEmail, sendCertificateEmail };
