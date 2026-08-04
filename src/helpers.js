@@ -6,6 +6,36 @@ const db = require('./db');
 
 const LEAVE_YEAR = { start: '2026-03-01', end: '2027-02-28' };
 
+// Shown on the dashboard welcome banner every time someone logs in, and reused (with a
+// thank-you line) in the leave-approval email. Kept short, work-appropriate and generic —
+// no attribution disputes, nothing that reads oddly out of context in an email.
+const MOTIVATIONAL_QUOTES = [
+  'Well done is better than well said.',
+  'The way to get started is to quit talking and begin doing.',
+  'Success is the sum of small efforts, repeated day in and day out.',
+  'It always seems impossible until it is done.',
+  'Believe you can, and you are halfway there.',
+  'Hard work beats talent when talent does not work hard.',
+  'A little progress each day adds up to big results.',
+  'Teamwork makes the dream work.',
+  'Great things are done by a series of small things brought together.',
+  'The harder you work for something, the greater you will feel when you achieve it.',
+  'Your work is going to fill a large part of your life — the only way to be truly satisfied is to do great work.',
+  'Opportunities do not happen. You create them.',
+  'Do not watch the clock; do what it does. Keep going.',
+  'Every accomplishment starts with the decision to try.',
+  'Take care of your people, and they will take care of everything else.',
+  'Small daily improvements are the key to staggering long-term results.',
+  'The best way to predict the future is to create it.',
+  'Keep your eyes on the stars, and your feet on the ground.',
+  'Quality is not an act, it is a habit.',
+  'You do not have to be great to start, but you have to start to be great.',
+];
+
+function randomQuote() {
+  return MOTIVATIONAL_QUOTES[Math.floor(Math.random() * MOTIVATIONAL_QUOTES.length)];
+}
+
 function toLocalIso(d) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
@@ -215,6 +245,8 @@ function nowIso() {
 
 module.exports = {
   LEAVE_YEAR,
+  MOTIVATIONAL_QUOTES,
+  randomQuote,
   toLocalIso,
   isValidCalendarDate,
   getHolidays,
