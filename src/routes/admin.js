@@ -105,13 +105,13 @@ router.get('/admin/employees', requireDirector, (req, res) => {
 });
 
 router.post('/admin/employees', requireDirector, (req, res) => {
-  const { id, name, email, deptId, role, title, entitlement, hireDate, contractMonths } = req.body;
+  const { id, name, email, deptId, role, title, entitlement, hireDate, dob, contractMonths } = req.body;
   if (!id || !name || !email) return res.status(400).json({ error: 'id, name and email are required.' });
   const exists = db.prepare('SELECT id FROM users WHERE id=? OR lower(email)=?').get(id, String(email).toLowerCase());
   if (exists) return res.status(409).json({ error: 'An employee with that ID or email already exists.' });
   db.prepare(
-    `INSERT INTO users (id, name, email, dept_id, role, title, entitlement, used, pending, active, hire_date, contract_months)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 1, ?, ?)`
+    `INSERT INTO users (id, name, email, dept_id, role, title, entitlement, used, pending, active, hire_date, contract_months, dob)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 1, ?, ?, ?)`
   ).run(
     id,
     name,
@@ -121,7 +121,8 @@ router.post('/admin/employees', requireDirector, (req, res) => {
     title || null,
     roundHalf(Number(entitlement)) || 15,
     hireDate || null,
-    contractMonths ? Number(contractMonths) : null
+    contractMonths ? Number(contractMonths) : null,
+    dob || null
   );
   db.prepare('INSERT INTO audit_log (actor_id, actor_name, action, detail, at) VALUES (?, ?, ?, ?, ?)').run(
     req.user.id,
