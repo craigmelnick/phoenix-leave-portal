@@ -170,6 +170,12 @@ addColumnIfMissing('users', 'terminated_at TEXT');
 addColumnIfMissing('users', 'termination_reason TEXT');
 addColumnIfMissing('users', 'payout_days REAL');
 
+// Date of birth, used as a second factor on login (email -> DOB check -> OTP) before the one-time
+// code is emailed out. NULL for anyone not yet backfilled - the login flow skips the DOB check
+// entirely for those accounts rather than locking them out, so existing staff keep working exactly
+// as before until the CEO sets a DOB for them (currently done via the Add employee form).
+addColumnIfMissing('users', 'dob TEXT');
+
 // Queued changes to the sensitive fields above (ID number, banking) - nothing here is ever
 // applied to the users row until the CEO approves it (src/routes/details.js).
 db.exec(`
