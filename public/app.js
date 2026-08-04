@@ -643,9 +643,9 @@ async function viewAdmin() {
     });
     html += `</table></div></div>`;
 
-    const { employees: allEmp } = await api('/admin/employees');
-    html += `<div class="panel"><h2>User roles <span class="hint">Set who has admin (CEO/Director) access vs a regular staff account</span></h2>
-      <div class="table-scroll"><table><tr><th>Employee</th><th>Role</th><th></th></tr>`;
+    const { employees: allEmp, departments: rolesDepts } = await api('/admin/employees');
+    html += `<div class="panel"><h2>User roles &amp; departments <span class="hint">Set who has admin (CEO/Director) access vs a regular staff account, and which department each person belongs to</span></h2>
+      <div class="table-scroll"><table><tr><th>Employee</th><th>Role</th><th>Department</th><th></th></tr>`;
     allEmp.forEach((e) => {
       html += `<tr>
         <td>${avatarHtml(e.name)}${e.name}</td>
@@ -654,6 +654,7 @@ async function viewAdmin() {
           <option value="manager" ${e.role === 'manager' ? 'selected' : ''}>Manager (approver)</option>
           <option value="director" ${e.role === 'director' ? 'selected' : ''}>Admin (Director / CEO)</option>
         </select></td>
+        <td><select id="dept_${e.id}" onchange="markAdminDirty()"><option value="">—</option>${rolesDepts.map((d) => `<option value="${d.id}" ${e.dept_id === d.id ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select></td>
         <td><button class="btn small danger" onclick="terminateEmployee('${e.id}','${esc(e.name)}')">Terminate</button></td>
       </tr>`;
     });
@@ -759,6 +760,10 @@ async function saveAllAdminChanges() {
   document.querySelectorAll('[id^="ent_"]').forEach((el) => {
     const id = el.id.replace('ent_', '');
     promises.push(api(`/admin/employees/${id}`, { method: 'PUT', body: { entitlement: Number(el.value) } }));
+  });
+  document.querySelectorAll('[id^="dept_"]').forEach((el) => {
+    const id = el.id.replace('dept_', '');
+    promises.push(api(`/admin/employees/${id}`, { method: 'PUT', body: { deptId: el.value || null } }));
   });
   await Promise.all(promises);
   adminDirty = false;
