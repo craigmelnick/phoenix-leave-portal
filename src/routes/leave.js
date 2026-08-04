@@ -16,6 +16,7 @@ const {
   stage2Pool,
   isAwaitingApproval,
   overlappingColleagues,
+  isSickNoteRequired,
   fmtDate,
   statusLabel,
   nowIso,
@@ -190,17 +191,27 @@ router.get('/leave-requests/preview', (req, res) => {
     entitlement: bal.entitlement,
     blocked: overlap.length > 0,
     overlapNames,
+    sickNoteRequired: type === 'Sick' && isSickNoteRequired(start, end),
   });
 });
 
 router.post('/leave-requests', (req, res) => {
   const user = req.user;
-  const { type, start, end, reason, escalationId } = req.body;
+  const { type, start, end, reason, escalationId, docFilename } = req.body;
   if (!isValidCalendarDate(start) || !isValidCalendarDate(end) || end <= start) {
     return res.status(400).json({ error: "Please choose a valid start date and return-to-work date (the return date must be after the start date)." });
   }
   const validTypes = ['Annual', 'Sick', 'Family Responsibility', 'Study Leave', 'Maternity', 'Paternity', 'Unpaid'];
   if (!validTypes.includes(type)) return res.status(400).json({ error: 'Invalid leave type.' });
+
+  // Sick leave adjacent to a weekend or public holiday needs a doctor's note attached — this is
+  // the pattern most likely to just be an extended break, so it's the one case sick leave isn't
+  // simply self-certified. Enforced here (not just as a UI hint) so it can't be bypassed.
+  if (type === 'Sick' && isSickNoteRequired(start, end) && !docFilename) {
+    return res.status(400).json({
+      error: "This sick leave starts or ends right next to a weekend or public holiday, so a doctor's note is required — please attach a supporting document before submitting.",
+    });
+  }
 
   const overlap = user.dept_id ? overlappingColleagues(user.dept_id, start, end, user.id) : [];
   if (overlap.length > 0) {
@@ -246,10 +257,10 @@ router.post('/leave-requests', (req, res) => {
 
   const info = db
     .prepare(
-      `INSERT INTO leave_requests (employee_id, dept_id, type, start_date, end_date, days, reason, status, created_at, escalation_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO leave_requests (employee_id, dept_id, type, start_date, end_date, days, reason, status, created_at, escalation_id, doc_filename)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(user.id, user.dept_id, type, start, end, days, reason || '', status, nowIso(), usedEscalation ? usedEscalation.id : null);
+    .run(user.id, user.dept_id, type, start, end, days, reason || '', status, nowIso(), usedEscalation ? usedEscalation.id : null, docFilename || null);
   const reqId = Number(info.lastInsertRowid);
 
   if (usedEscalation) {
