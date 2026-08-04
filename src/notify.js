@@ -17,7 +17,7 @@ function notifyApprovalNeeded(request, employee, approverId) {
 }
 
 const db = require('./db');
-const { fmtDate, getCeoId, nowIso } = require('./helpers');
+const { fmtDate, getCeoId, nowIso, randomQuote } = require('./helpers');
 const { sendNotificationEmail } = require('./email');
 
 // Every notification always gets its in-app record (the bell icon), regardless of whether the
@@ -75,4 +75,15 @@ function notifyOnApproval(request, employee) {
   }
 }
 
-module.exports = { pushNotification, notifyOnApproval, notifyApprovalNeeded };
+// Tells the employee themselves that their own leave was approved — notifyOnApproval() above
+// deliberately excludes the employee from all three of its notification loops (it's written for
+// telling everyone ELSE), so without this the person who actually asked for the leave never
+// heard back. Includes a rotating motivational quote and a genuine thank-you, since this is the
+// one notification in the whole system that's actually good news for the person receiving it.
+function notifyEmployeeApproved(request, employee) {
+  const dateRange = fmtDate(request.start_date) + (request.start_date !== request.end_date ? ' – ' + fmtDate(request.end_date) : '');
+  const message = `Good news, ${employee.name.split(' ')[0]} — your ${request.type} leave for ${dateRange} (${request.days} day(s)) has been approved. Thank you for all your hard work — enjoy your well-earned break! "${randomQuote()}"`;
+  pushNotification(employee.id, message);
+}
+
+module.exports = { pushNotification, notifyOnApproval, notifyApprovalNeeded, notifyEmployeeApproved };
