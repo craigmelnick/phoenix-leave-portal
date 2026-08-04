@@ -66,6 +66,17 @@ router.post('/request-otp', async (req, res) => {
     // Don't reveal whether the email exists — generic response either way.
     return res.json({ ok: true });
   }
+
+  // DOB check (email -> DOB check -> OTP). Only enforced for employees who have a date of birth
+  // on file (see the "dob" column in db.js) - anyone not yet backfilled skips straight to the OTP,
+  // exactly like before this feature existed, so nobody gets locked out of their own account.
+  if (user.dob) {
+    const dob = String(req.body.dob || '').trim();
+    if (!dob || dob !== user.dob) {
+      return res.status(401).json({ error: 'That date of birth doesn\'t match our records.' });
+    }
+  }
+
   const code = String(crypto.randomInt(1000, 10000));
   const expiresAt = new Date(Date.now() + OTP_MINUTES * 60 * 1000).toISOString();
   db.prepare('INSERT INTO otp_codes (user_id, code, expires_at, used, created_at) VALUES (?, ?, ?, 0, ?)').run(
