@@ -142,7 +142,7 @@ function navItemsFor(u) {
   if (u.isApprover || u.role === 'director') items.push({ id: 'approvals', label: 'Approvals' });
   items.push({ id: 'teamcal', label: 'Team calendar' });
   items.push({ id: 'notifications', label: 'Notifications' });
-  if (u.role === 'director') items.push({ id: 'admin', label: 'Admin settings' });
+  if (u.role === 'director' || u.role === 'manager') items.push({ id: 'admin', label: 'Admin settings' });
   if (u.role === 'director') items.push({ id: 'audit', label: 'Audit log' });
   items.push({ id: 'ideas', label: 'Platform ideas' });
   return items;
@@ -665,18 +665,22 @@ async function viewAdmin() {
   });
   html += `</table></div></div>`;
 
-  if (user.role === 'director') {
+  if (user.role === 'director' || user.role === 'manager') {
     const { employees } = await api('/admin/entitlements');
-    html += `<div class="panel"><h2>Employee entitlements <span class="hint">Visible to the CEO only — individual balances aren't shown to department managers, to avoid tenure-based conflicts of interest</span></h2><p class="hint" style="margin:4px 0 10px;">Annual entitlement is earned monthly in arrears from each person's hire date (reset to 1 March each leave year) — "Accrued to date" is what's actually available to take right now. Fixed-term contract staff stop accruing once their contract ends.</p><div class="table-scroll"><table><tr><th>Employee</th><th>Department</th><th>Since</th><th>Annual entitlement</th><th>Accrued to date</th><th>Used</th><th>Pending</th><th>Remaining</th></tr>`;
+    const canEditEntitlements = user.role === 'director';
+    html += `<div class="panel"><h2>Employee entitlements <span class="hint">${canEditEntitlements ? 'Visible to you and department managers' : 'Visible to management — view only; the CEO makes any changes'}</span></h2><p class="hint" style="margin:4px 0 10px;">Annual entitlement is earned monthly in arrears from each person's hire date (reset to 1 March each leave year) — "Accrued to date" is what's actually available to take right now. Fixed-term contract staff stop accruing once their contract ends.</p><div class="table-scroll"><table><tr><th>Employee</th><th>Department</th><th>Since</th><th>Annual entitlement</th><th>Accrued to date</th><th>Used</th><th>Pending</th><th>Remaining</th></tr>`;
     employees.forEach((e) => {
            const since = e.hireDate ? fmtDate(e.hireDate) : '—';
            const contractNote = e.contractMonths ? `<div class="hint">${e.contractMonths}-month contract</div>` : '';
-           html += `<tr><td>${avatarHtml(e.name)}${e.name}</td><td>${e.department}</td><td>${since}${contractNote}</td><td><input type="number" id="ent_${e.id}" value="${e.entitlement}" step="0.5" style="width:70px;" oninput="markAdminDirty()"></td><td>${e.accrued}</td><td>${e.used}</td><td>${e.pending}</td><td><b style="color:var(--teal-dark)">${e.remaining}</b></td></tr>`;
+           const entCell = canEditEntitlements
+             ? `<input type="number" id="ent_${e.id}" value="${e.entitlement}" step="0.5" style="width:70px;" oninput="markAdminDirty()">`
+             : e.entitlement;
+           html += `<tr><td>${avatarHtml(e.name)}${e.name}</td><td>${e.department}</td><td>${since}${contractNote}</td><td>${entCell}</td><td>${e.accrued}</td><td>${e.used}</td><td>${e.pending}</td><td><b style="color:var(--teal-dark)">${e.remaining}</b></td></tr>`;
 
     });
     html += `</table></div></div>`;
   } else {
-    html += `<div class="info-box">Individual leave balances are only visible to the CEO and to each employee for their own account — this keeps how much leave a colleague has earned private.</div>`;
+    html += `<div class="info-box">Individual leave balances are only visible to management and to each employee for their own account — this keeps how much leave a colleague has earned private.</div>`;
   }
   return html;
 }
@@ -919,7 +923,7 @@ async function render() {
     else if (currentView === 'approvals') html = await viewApprovals();
     else if (currentView === 'teamcal') html = await viewTeamCal();
     else if (currentView === 'notifications') html = await viewNotifications();
-    else if (currentView === 'admin') html = user.role === 'director' ? await viewAdmin() : (currentView = 'dashboard', await viewDashboard());
+    else if (currentView === 'admin') html = (user.role === 'director' || user.role === 'manager') ? await viewAdmin() : (currentView = 'dashboard', await viewDashboard());
     else if (currentView === 'audit') html = user.role === 'director' ? await viewAuditLog() : (currentView = 'dashboard', await viewDashboard());
     else if (currentView === 'ideas') html = viewIdeas();
     else if (currentView === 'certificate') html = await viewCertificate();
