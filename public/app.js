@@ -283,8 +283,8 @@ function viewRequest() {
       </div>
       <div class="form-field full"><label>Reason (optional)</label><textarea id="reqReason" rows="2" placeholder="e.g. family trip, medical appointment..."></textarea></div>
       <div class="form-field full" id="docField" style="display:none;">
-        <label>Supporting document <span class="hint">e.g. a doctor's/sick note — optional, stored with the request</span></label>
-        <input type="file" id="reqDoc">
+        <label id="docFieldLabel">Supporting document <span class="hint">e.g. a doctor's/sick note — optional, stored with the request</span></label>
+        <input type="file" id="reqDoc" onchange="updateRequestPreview()">
       </div>
     </div>
     <div id="reqPreview" style="margin-top:14px;"></div>
@@ -313,6 +313,7 @@ async function updateRequestPreview() {
      const submitBtn = document.getElementById('submitBtn');
      const availableInput = document.getElementById('reqAvailable');
      window.activeEscalationId = null;
+     window.sickNoteRequired = false;
      try {
             const p = new URLSearchParams({ start, end, type });
             const preview = await api('/leave-requests/preview?' + p.toString());
@@ -354,8 +355,23 @@ async function updateRequestPreview() {
             if (preview.blocked) {
                      html += `<div class="warn-box">🚫 Not permitted — only one person per department may be on leave at a time. ${preview.overlapNames.join(', ')} already ${preview.overlapNames.length > 1 ? 'have' : 'has'} approved or pending leave during this period. Please choose different dates.</div>`;
             }
+
+            let docMissing = false;
+            const docLabel = document.getElementById('docFieldLabel');
+            if (preview.sickNoteRequired) {
+                     window.sickNoteRequired = true;
+                     const hasDoc = document.getElementById('reqDoc') && document.getElementById('reqDoc').files.length > 0;
+                     if (docLabel) docLabel.innerHTML = `Supporting document <span class="hint" style="color:#b45309;">required — this sick leave is next to a weekend or public holiday, so a doctor's note is needed</span>`;
+                     if (!hasDoc) {
+                                docMissing = true;
+                                html += `<div class="warn-box">🩺 This sick leave starts or ends right next to a weekend or public holiday, so a doctor's note is required before you can submit — please attach one above.</div>`;
+                     }
+            } else if (docLabel) {
+                     docLabel.innerHTML = `Supporting document <span class="hint">e.g. a doctor's/sick note — optional, stored with the request</span>`;
+            }
+
             box.innerHTML = html;
-            if (submitBtn) submitBtn.disabled = preview.blocked;
+            if (submitBtn) submitBtn.disabled = preview.blocked || docMissing;
      } catch (e) {
             box.innerHTML = `<div class="warn-box">⚠️ ${e.message}</div>`;
      }
@@ -378,8 +394,10 @@ async function submitLeaveRequest() {
   const type = document.getElementById('reqType').value;
   const { start, end } = readRequestDates();
   const reason = document.getElementById('reqReason').value;
+  const docInput = document.getElementById('reqDoc');
+  const docFilename = docInput && docInput.files.length > 0 ? docInput.files[0].name : null;
   try {
-        const result = await api('/leave-requests', { method: 'POST', body: { type, start, end, reason, escalationId: window.activeEscalationId || undefined } });
+        const result = await api('/leave-requests', { method: 'POST', body: { type, start, end, reason, docFilename, escalationId: window.activeEscalationId || undefined } });
     alert(`Request submitted: ${result.days} day(s) of ${type} leave, ${fmtDate(start)} – ${fmtDate(end)}. Status: ${statusLabel(result.status)}.`);
     currentView = 'myrequests';
     render();
