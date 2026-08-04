@@ -18,6 +18,7 @@ const calendarRoutes = require('./routes/calendar');
 const adminRoutes = require('./routes/admin');
 const escalationsRoutes = require('./routes/escalations');
 const detailsRoutes = require('./routes/details');
+const bugsRoutes = require('./routes/bugs');
 
 // Make sure the real Phoenix roster / departments / holidays exist on first run.
 // Safe to call every startup — it only inserts rows that aren't already there.
@@ -36,6 +37,7 @@ app.use('/api', calendarRoutes);
 app.use('/api', adminRoutes);
 app.use('/api', escalationsRoutes);
 app.use('/api', detailsRoutes);
+app.use('/api', bugsRoutes);
 
 // no-cache (not "don't cache" — "always revalidate with the server first") so that every
 // deploy is reflected immediately for everyone, instead of browsers silently serving an old
