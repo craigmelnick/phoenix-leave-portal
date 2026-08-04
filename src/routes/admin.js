@@ -252,4 +252,38 @@ router.get('/admin/audit-log', requireDirector, (req, res) => {
   res.json({ entries: rows });
 });
 
+
+// ---- Terminate / offboard an employee (CEO-only) ----
+// Soft-deletes the account (active=0, matching the pattern used everywhere else - historical leave
+// records must survive for reporting/audit), cancels anything still pending so it doesn't linger
+// forever awaiting approval, and snapshots the accrued-but-unused annual leave balance as the
+// payout owed to them, since that figure would otherwise keep changing after they've left.
+router.post('/admin/employees/:id/terminate', requireDirector, (req, res) => {
+  const target = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'Employee not found.' });
+  if (!target.active) return res.status(409).json({ error: 'This employee has already been terminated.' });
+
+  const reason = (req.body && req.body.reason) ? String(req.body.reason).slice(0, 2000) : null;
+  const payoutDays = roundHalf(Math.max(0, accruedDays(target) - target.used));
+
+  const pendingRequests = db.prepare(`SELECT * FROM leave_requests WHERE employee_id=? AND status IN ('pending_1','pending_2')`).all(target.id);
+  pendingRequests.forEach((r) => {
+    db.prepare(`UPDATE leave_requests SET status='cancelled' WHERE id=?`).run(r.id);
+  });
+
+  db.prepare(
+    'UPDATE users SET active=0, terminated_at=?, termination_reason=?, payout_days=? WHERE id=?'
+  ).run(nowIso(), reason, payoutDays, target.id);
+
+  db.prepare('INSERT INTO audit_log (actor_id, actor_name, action, detail, at) VALUES (?, ?, ?, ?, ?)').run(
+    req.user.id,
+    req.user.name,
+    'employee_terminated',
+    `${target.name} was terminated by ${req.user.name}${reason ? ` (${reason})` : ''} - ${pendingRequests.length} pending request(s) cancelled, ${payoutDays} day(s) unused leave to pay out`,
+    nowIso()
+  );
+
+  res.json({ ok: true, payoutDays, cancelledRequests: pendingRequests.length });
+});
+
 module.exports = router;
