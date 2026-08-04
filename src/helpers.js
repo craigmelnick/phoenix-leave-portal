@@ -44,6 +44,13 @@ function businessDaysBetween(startStr, endStr) {
   return count;
 }
 
+// Leave-day figures are only ever shown to the half-day, never finer — rounds to the nearest
+// 0.5 rather than leaving arbitrary two-decimal fractions (like 8.33 or 7.29, which fall
+// straight out of entitlement/12 monthly accrual math) on screen or in balance checks.
+function roundHalf(n) {
+  return Math.round(n * 2) / 2;
+}
+
 // Annual leave is earned monthly, in arrears — you must complete a full calendar month before
 // that month's share is credited. A person on 15 days/year earns 15/12 = 1.25 days for each
 // completed month. The clock always resets to the leave year start (1 March) for everyone, but:
@@ -67,14 +74,14 @@ function monthsElapsedInArrears(user, asOf) {
 
 function accruedDays(user, asOf) {
   const months = monthsElapsedInArrears(user, asOf);
-  return Math.round(((user.entitlement * months) / 12) * 100) / 100;
+  return roundHalf((user.entitlement * months) / 12);
 }
 
 // "Available" balance is based on what's actually been accrued so far this leave year (in
 // arrears), not the full annual entitlement — matches the real company policy: you can't book
 // leave you haven't earned yet.
 function remainingDays(user) {
-  return Math.round((accruedDays(user) - user.used - user.pending) * 100) / 100;
+  return roundHalf(accruedDays(user) - user.used - user.pending);
 }
 
 // How far ahead someone is allowed to book leave in the normal flow before it needs management
@@ -105,7 +112,7 @@ function isBeyondAdvanceWindow(startIso, asOf) {
 // annual leave they haven't earned yet today, as long as they will have earned it by the time
 // the leave actually starts (and it's within the advance window above).
 function remainingDaysAsOf(user, asOfIso) {
-  return Math.round((accruedDays(user, asOfIso) - user.used - user.pending) * 100) / 100;
+  return roundHalf(accruedDays(user, asOfIso) - user.used - user.pending);
 }
 
 // The headline "available to book right now" balance, including the advance-booking window —
@@ -122,7 +129,7 @@ function remainingDaysAdvance(user) {
 // as of today — the exposure HR would need to claw back from a final salary if they resigned
 // right now. Zero once accrual catches up.
 function advanceDaysTaken(user) {
-  return Math.max(0, Math.round((user.used + user.pending - accruedDays(user)) * 100) / 100);
+  return Math.max(0, roundHalf(user.used + user.pending - accruedDays(user)));
 }
 
 // The backup pool for the *second* (final) approval step — either person can act.
@@ -193,6 +200,7 @@ module.exports = {
   isValidCalendarDate,
   getHolidays,
   businessDaysBetween,
+  roundHalf,
   remainingDays,
   accruedDays,
   advanceWindowCutoff,
