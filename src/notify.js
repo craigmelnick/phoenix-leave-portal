@@ -20,10 +20,29 @@ const db = require('./db');
 const { fmtDate, getCeoId, nowIso } = require('./helpers');
 const { sendNotificationEmail } = require('./email');
 
+// Every notification always gets its in-app record (the bell icon), regardless of whether the
+// email send succeeds — so nobody misses something waiting on them just because SMTP hiccuped.
+// If the email itself fails, that failure is written to the audit log (visible under Audit log
+// in the admin section) instead of only going to the server console, which nobody can see on a
+// live Render deployment. That way a silent delivery failure like a bounce or spam-block shows
+// up as a first-class, CEO-visible event instead of vanishing.
 function pushNotification(userId, text) {
   db.prepare('INSERT INTO notifications (user_id, text, read, created_at) VALUES (?, ?, 0, ?)').run(userId, text, nowIso());
-  const user = db.prepare('SELECT email FROM users WHERE id = ?').get(userId);
-  if (user) sendNotificationEmail(user.email, 'Phoenix Leave Portal notification', text).catch((e) => console.error('Notification email failed:', e.message));
+  const user = db.prepare('SELECT email, name FROM users WHERE id = ?').get(userId);
+  if (user) {
+    sendNotificationEmail(user.email, 'Phoenix Leave Portal notification', text).catch((e) => {
+      console.error('Notification email failed:', e.message);
+      try {
+        db.prepare('INSERT INTO audit_log (actor_id, actor_name, action, detail, at) VALUES (?, ?, ?, ?, ?)').run(
+          null,
+          'System',
+          'notification_email_failed',
+          `Email to ${user.name} (${user.email}) could not be sent: ${e.message}`,
+          nowIso()
+        );
+      } catch (_) { /* best effort - never let logging break the request */ }
+    });
+  }
 }
 
 function notifyOnApproval(request, employee) {
