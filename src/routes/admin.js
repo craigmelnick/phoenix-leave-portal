@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db');
-const { requireAuth, requireDirector } = require('../middleware/auth');
+const { requireAuth, requireDirector, requireManagement } = require('../middleware/auth');
 const { remainingDays, remainingDaysAdvance, accruedDays, roundHalf, nowIso, statusLabel, fmtDate } = require('../helpers');
 const { pushNotification } = require('../notify');
 
@@ -74,10 +74,11 @@ router.get('/admin/report', (req, res) => {
   });
 });
 
-// ---- Employee entitlements - CEO-only (privacy: managers never see individual balances) ----
+// ---- Employee entitlements - CEO and managers can view; only the CEO can edit (enforced by
+// the separate PUT /admin/employees/:id route, which stays requireDirector-only) ----
 // "remaining" here includes the advance-booking window (everyone automatically qualifies for
 // it), matching what the employee themselves sees as their available balance on their dashboard.
-router.get('/admin/entitlements', requireDirector, (req, res) => {
+router.get('/admin/entitlements', requireManagement, (req, res) => {
   const users = db.prepare(`SELECT * FROM users WHERE dept_id IS NOT NULL AND active=1 ORDER BY name`).all();
   const departments = db.prepare('SELECT * FROM departments').all();
   res.json({
