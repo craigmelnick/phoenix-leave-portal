@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth, requireDirector } = require('../middleware/auth');
-const { remainingDays, remainingDaysAdvance, accruedDays, nowIso, statusLabel, fmtDate } = require('../helpers');
+const { remainingDays, remainingDaysAdvance, accruedDays, roundHalf, nowIso, statusLabel, fmtDate } = require('../helpers');
 const { pushNotification } = require('../notify');
 
 const router = express.Router();
@@ -118,7 +118,7 @@ router.post('/admin/employees', requireDirector, (req, res) => {
     deptId || null,
     role || 'staff',
     title || null,
-    Number(entitlement) || 15,
+    roundHalf(Number(entitlement)) || 15,
     hireDate || null,
     contractMonths ? Number(contractMonths) : null
   );
@@ -156,7 +156,7 @@ router.put('/admin/employees/:id', requireDirector, (req, res) => {
     deptId !== undefined ? deptId : target.dept_id,
     role !== undefined ? role : target.role,
     title !== undefined ? title : target.title,
-    entitlement !== undefined ? Number(entitlement) : target.entitlement,
+    entitlement !== undefined ? roundHalf(Number(entitlement)) : target.entitlement,
     active !== undefined ? (active ? 1 : 0) : target.active,
     hireDate !== undefined ? hireDate : target.hire_date,
     contractMonths !== undefined ? (contractMonths ? Number(contractMonths) : null) : target.contract_months,
