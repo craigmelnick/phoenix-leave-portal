@@ -629,7 +629,7 @@ async function viewAdmin() {
 
     const { employees: allEmp } = await api('/admin/employees');
     html += `<div class="panel"><h2>User roles <span class="hint">Set who has admin (CEO/Director) access vs a regular staff account</span></h2>
-      <div class="table-scroll"><table><tr><th>Employee</th><th>Role</th></tr>`;
+      <div class="table-scroll"><table><tr><th>Employee</th><th>Role</th><th></th></tr>`;
     allEmp.forEach((e) => {
       html += `<tr>
         <td>${avatarHtml(e.name)}${e.name}</td>
@@ -638,6 +638,7 @@ async function viewAdmin() {
           <option value="manager" ${e.role === 'manager' ? 'selected' : ''}>Manager (approver)</option>
           <option value="director" ${e.role === 'director' ? 'selected' : ''}>Admin (Director / CEO)</option>
         </select></td>
+        <td><button class="btn small danger" onclick="terminateEmployee('${e.id}','${esc(e.name)}')">Terminate</button></td>
       </tr>`;
     });
     html += `</table></div></div>`;
@@ -1075,6 +1076,19 @@ async function addEmployee() {
     render();
   } catch (e) {
     alert(e.message || 'Could not add that employee.');
+  }
+}
+
+
+async function terminateEmployee(id, name) {
+  if (!confirm(`Terminate ${name}? This deactivates their account, cancels any pending leave requests, and calculates their unused leave payout. This cannot be undone from here.`)) return;
+  const reason = prompt('Reason for termination (optional):') || '';
+  try {
+    const result = await api(`/admin/employees/${id}/terminate`, { method: 'POST', body: { reason } });
+    alert(`${name} has been terminated. Unused annual leave payout owed: ${result.payoutDays} day(s).`);
+    render();
+  } catch (e) {
+    alert(e.message || 'Could not terminate that employee.');
   }
 }
 
