@@ -40,6 +40,14 @@ async function api(path, options = {}) {
 function fmtDate(iso) {
   return new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
 }
+// Escapes free-text fields (leave reason, noticeboard message, uploaded filenames) before they're
+// inserted into innerHTML - without this, someone typing something like <img src=x onerror=...>
+// into the Reason box would have it executed as real HTML for every approver, department
+// colleague and admin who later views that request. Everything else in the UI (names, dates,
+// statuses) comes from the roster or the server's own generated strings, not raw user input.
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 function avatarColorFor(name) {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
@@ -227,10 +235,10 @@ async function viewDashboard() {
     html += `<div class="warn-box">⏰ Year-end reminder: you still have ${d.yearEndReminder} day(s) of annual leave unused, and it will be forfeited on ${fmtDate(d.leaveYear.end)}. Book it before then.</div>`;
   }
 
-  html += `<div class="panel"><h2>Noticeboard</h2><p style="font-size:13.5px;color:var(--ink);margin:0;">${d.noticeboard}</p>`;
+  html += `<div class="panel"><h2>Noticeboard</h2><p style="font-size:13.5px;color:var(--ink);margin:0;">${esc(d.noticeboard)}</p>`;
   if (user.role === 'director') {
     html += `<div style="margin-top:12px;">
-      <textarea id="noticeboardInput" rows="2" style="width:100%;">${d.noticeboard}</textarea>
+      <textarea id="noticeboardInput" rows="2" style="width:100%;">${esc(d.noticeboard)}</textarea>
       <button class="btn secondary small" style="margin-top:8px;" onclick="saveNoticeboard()">Update noticeboard</button>
     </div>`;
   }
@@ -385,12 +393,12 @@ async function viewMyRequests() {
     html += `<div class="table-scroll"><table><tr><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Status</th><th>Notes</th><th>Audit trail</th><th></th></tr>`;
     requests.forEach((r) => {
       const trailText = r.trail.length ? r.trail.join('<br>') : '—';
-      const docText = r.doc ? `<br><span style="color:var(--muted);">📎 ${r.doc}</span>` : '';
+      const docText = r.doc ? `<br><span style="color:var(--muted);">📎 ${esc(r.doc)}</span>` : '';
       const certBtn = r.status === 'approved' ? `<button class="btn small secondary" onclick="openCertificate(${r.id})">Certificate</button>` : '';
       const cancellable = ['pending_1', 'pending_2', 'approved'].includes(r.status);
       const cancelBtn = cancellable ? `<button class="btn small danger" onclick="cancelMyRequest(${r.id})" title="Withdraw this request">✕ Cancel</button>` : '';
       html += `<tr><td>${r.type}</td><td>${fmtDate(r.start)}</td><td>${fmtDate(r.end)}</td><td>${r.days}</td>
-        <td><span class="pill ${r.status}">${r.statusLabel}</span></td><td style="color:var(--muted)">${r.reason || '—'}${docText}</td>
+        <td><span class="pill ${r.status}">${r.statusLabel}</span></td><td style="color:var(--muted)">${r.reason ? esc(r.reason) : '—'}${docText}</td>
         <td style="font-size:11.5px;color:var(--muted);">${trailText}</td><td style="white-space:nowrap;">${certBtn} ${cancelBtn}</td></tr>`;
     });
     html += `</table></div>`;
@@ -417,7 +425,7 @@ async function viewApprovals() {
   else {
     html += `<div class="table-scroll"><table><tr><th>Employee</th><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th></th></tr>`;
     pending.forEach((r) => {
-      html += `<tr><td>${avatarHtml(r.employeeName)}${r.employeeName}</td><td>${r.type}</td><td>${fmtDate(r.start)}</td><td>${fmtDate(r.end)}</td><td>${r.days}</td><td style="color:var(--muted)">${r.reason || '—'}</td>
+      html += `<tr><td>${avatarHtml(r.employeeName)}${r.employeeName}</td><td>${r.type}</td><td>${fmtDate(r.start)}</td><td>${fmtDate(r.end)}</td><td>${r.days}</td><td style="color:var(--muted)">${r.reason ? esc(r.reason) : '—'}</td>
         <td style="white-space:nowrap;">
           <button class="btn small" onclick="actOnRequest(${r.id},'approve')">Approve</button>
           <button class="btn small danger" onclick="actOnRequest(${r.id},'reject')">Reject</button>
@@ -434,7 +442,7 @@ async function viewApprovals() {
             else {
                      html += `<div class="table-scroll"><table><tr><th>Employee</th><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th></th></tr>`;
                      escalations.forEach((e) => {
-                                html += `<tr><td>${avatarHtml(e.employeeName)}${e.employeeName}</td><td>${e.type}</td><td>${fmtDate(e.start)}</td><td>${fmtDate(e.end)}</td><td>${e.days}</td><td style="color:var(--muted)">${e.reason || '—'}</td>
+                                html += `<tr><td>${avatarHtml(e.employeeName)}${e.employeeName}</td><td>${e.type}</td><td>${fmtDate(e.start)}</td><td>${fmtDate(e.end)}</td><td>${e.days}</td><td style="color:var(--muted)">${e.reason ? esc(e.reason) : '—'}</td>
                                           <td style="white-space:nowrap;">
                                                       <button class="btn small" onclick="actOnEscalation(${e.id},'approve')">Approve</button>
                                                                   <button class="btn small danger" onclick="actOnEscalation(${e.id},'reject')">Reject</button>
@@ -555,7 +563,7 @@ async function viewNotifications() {
   const { notifications } = await api('/notifications');
   let html = `<div class="panel"><h2>Notifications <span class="hint">Read-only — informational, no action required</span></h2>`;
   if (notifications.length === 0) { html += `<div class="empty">No notifications yet.</div>`; }
-  else { notifications.forEach((n) => html += `<div class="notif-item"><div class="notif-dot"></div><div>${n.text}</div></div>`); }
+  else { notifications.forEach((n) => html += `<div class="notif-item"><div class="notif-dot"></div><div>${esc(n.text)}</div></div>`); }
   html += `</div>`;
   return html;
 }
@@ -842,7 +850,7 @@ async function viewAuditLog() {
         <td style="white-space:nowrap;color:var(--muted);font-size:12px;">${fmtDateTime(e.at)}</td>
         <td style="white-space:nowrap;">${avatarHtml(e.actor_name)}${e.actor_name}</td>
         <td>${auditActionLabel(e.action)}</td>
-        <td style="color:var(--muted)">${e.detail}</td>
+        <td style="color:var(--muted)">${esc(e.detail)}</td>
       </tr>`;
     });
     html += `</table></div>`;
@@ -855,74 +863,6 @@ function viewIdeas() {
   return `<div class="panel"><h2>Feature ideas from other leave platforms <span class="hint">researched from BambooHR, Personio, Deputy, Factorial, AttendanceBot</span></h2>
     <ul class="feature-list">
       <li><b>Team availability / conflict warnings</b> — flags when teammates in the same department are already off during the requested dates.</li>
-      <li><b>Per-person approver assignment</b> — the CEO personally assigns up to three approvers for each employee.</li>
-      <li><b>Self-service balance &amp; history</b> — staff see entitlement, used, pending and remaining without asking HR.</li>
-      <li><b>Public holiday awareness</b> — requests auto-exclude weekends and public holidays from the day count.</li>
-      <li><b>Multiple leave types</b> — Annual, Sick, Family Responsibility, Study Leave, Maternity, Paternity, Unpaid, with a document upload for sick leave.</li>
-      <li><b>Email notifications</b> — approvers and the CEO get an email the moment a request needs them or gets decided.</li>
-      <li><b>Audit trail</b> — every approval step is timestamped and attributed; visible per request on My Requests.</li>
-      <li><b>Manager &amp; company-wide reporting</b> — approved days and open requests by department, without exposing individual balances.</li>
-      <li><b>Automatic year-end reminders</b> — a banner nudges staff every January/February who still have unused balance before it's forfeited.</li>
-      <li><b>Private balances</b> — only the CEO and the employee themselves can see that employee's exact leave balance.</li>
-      <li><b>Printable leave certificate</b> — a digital, downloadable confirmation of approved leave with remaining balance.</li>
-      <li><b>Real, persistent database</b> — every request, approval and notification is stored permanently, surviving restarts and giving a genuine audit record.</li>
-    </ul>
-  </div>`;
-}
-
-/* ---------------- Render ---------------- */
-
-const titles = { dashboard: 'Dashboard', request: 'Request leave', myrequests: 'My requests', approvals: 'Approvals', teamcal: 'Team calendar', notifications: 'Notifications', admin: 'Admin settings', audit: 'Audit log', ideas: 'Platform ideas', certificate: 'Leave certificate' };
-
-async function render() {
-  renderNav();
-  renderBottomNav();
-  renderBell();
-  renderTopbarMeta();
-  document.getElementById('pageTitle').textContent = titles[currentView] || 'Dashboard';
-  const content = document.getElementById('content');
-  content.innerHTML = '<div class="empty">Loading…</div>';
-  let html = '';
-  try {
-    if (currentView === 'dashboard') html = await viewDashboard();
-    else if (currentView === 'request') html = viewRequest();
-    else if (currentView === 'myrequests') html = await viewMyRequests();
-    else if (currentView === 'approvals') html = await viewApprovals();
-    else if (currentView === 'teamcal') html = await viewTeamCal();
-    else if (currentView === 'notifications') html = await viewNotifications();
-    else if (currentView === 'admin') html = user.role === 'director' ? await viewAdmin() : (currentView = 'dashboard', await viewDashboard());
-    else if (currentView === 'audit') html = user.role === 'director' ? await viewAuditLog() : (currentView = 'dashboard', await viewDashboard());
-    else if (currentView === 'ideas') html = viewIdeas();
-    else if (currentView === 'certificate') html = await viewCertificate();
-  } catch (e) {
-    html = `<div class="panel"><div class="empty">${e.message}</div></div>`;
-  }
-  content.innerHTML = html;
-
-  if (currentView === 'request') {
-    ['reqStart', 'reqEnd'].forEach((id) => {
-      document.getElementById(id).addEventListener('change', updateRequestPreview);
-    });
-    document.getElementById('reqType').addEventListener('change', () => { toggleDocField(); updateRequestPreview(); });
-    updateRequestPreview();
-  }
-}
-
-/* ---------------- Boot ---------------- */
-
-(async function boot() {
-  try {
-    const result = await api('/auth/me');
-    user = result.user;
-    document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('app').style.display = 'flex';
-    render();
-  } catch (e) {
-try { const r = await api('/auth/roster'); roster = r.users || []; } catch (_) { roster = []; }
-         renderLogin();
-  }
-})();
-equested dates.</li>
       <li><b>Per-person approver assignment</b> — the CEO personally assigns up to three approvers for each employee.</li>
       <li><b>Self-service balance &amp; history</b> — staff see entitlement, used, pending and remaining without asking HR.</li>
       <li><b>Public holiday awareness</b> — requests auto-exclude weekends and public holidays from the day count.</li>
