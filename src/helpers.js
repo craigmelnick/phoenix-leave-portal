@@ -255,6 +255,81 @@ function overlappingColleagues(deptId, start, end, excludeEmployeeId) {
   });
 }
 
+// Pulls together everything a leave certificate needs to display, straight from the database —
+// shared by the in-app printable certificate (GET /leave-requests/:id/certificate) and the
+// automatic email sent the moment a request is finally approved, so the two can never drift out
+// of sync with each other. Returns null if the request doesn't exist or isn't (yet) approved.
+function buildCertificateData(requestId) {
+  const r = db.prepare('SELECT * FROM leave_requests WHERE id=?').get(requestId);
+  if (!r || r.status !== 'approved') return null;
+  const employee = db.prepare('SELECT * FROM users WHERE id=?').get(r.employee_id);
+  if (!employee) return null;
+  const dept = r.dept_id ? db.prepare('SELECT * FROM departments WHERE id=?').get(r.dept_id) : null;
+  const trail = db.prepare('SELECT * FROM approval_trail WHERE request_id=?').all(r.id);
+  const approvals = trail.filter((t) => t.action.indexOf('approved') === 0).map((t) => t.by_name);
+  return {
+    requestId: r.id,
+    refNo: 'PHX-' + String(r.id).padStart(5, '0'),
+    issuedDate: fmtDate(new Date().toISOString().slice(0, 10)),
+    employeeName: employee.name,
+    employeeEmail: employee.email,
+    department: dept ? dept.name : '-',
+    type: r.type,
+    dateRange: fmtDate(r.start_date) + (r.start_date !== r.end_date ? ' – ' + fmtDate(r.end_date) : ''),
+    days: r.days,
+    approvedBy: approvals.length ? approvals.join(', ') : 'Auto-approved',
+    remainingBalance: remainingDays(employee),
+    entitlement: employee.entitlement,
+    leaveYear: LEAVE_YEAR,
+  };
+}
+
+// Renders the certificate as a single self-contained HTML fragment, styled entirely with inline
+// CSS and table-based layout so it holds up both in the app (dropped straight into a page) and
+// in an email client (many of which strip <style> blocks and ignore modern CSS). Deliberately a
+// notch more "designed" than a plain data dump — a teal double-ruled card with the Phoenix brand
+// colour, meant to look like something worth keeping, since this is the one document in the
+// whole system an employee might actually want to save or forward on.
+function renderCertificateHtml(cert) {
+  const teal = '#0d9488';
+  const tealDark = '#0f766e';
+  const ink = '#1f2937';
+  const muted = '#64748b';
+  const row = (label, value, bold) =>
+    `<tr>
+      <td style="padding:9px 4px;border-bottom:1px solid #e2e8f0;color:${muted};font-size:13px;width:42%;">${label}</td>
+      <td style="padding:9px 4px;border-bottom:1px solid #e2e8f0;color:${ink};font-size:13.5px;${bold ? 'font-weight:600;' : ''}">${value}</td>
+    </tr>`;
+  return `
+  <div style="max-width:560px;margin:0 auto;font-family:Georgia,'Times New Roman',serif;background:#ffffff;border:2px solid ${teal};border-radius:10px;overflow:hidden;">
+    <div style="background:${teal};padding:22px 28px;">
+      <div style="font-family:Arial,Helvetica,sans-serif;color:#ffffff;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;opacity:.9;">Phoenix International Logistics</div>
+      <div style="font-family:Arial,Helvetica,sans-serif;color:#ffffff;font-size:20px;font-weight:700;margin-top:4px;">Certificate of Approved Leave</div>
+    </div>
+    <div style="padding:26px 28px;">
+      <div style="font-family:Arial,Helvetica,sans-serif;color:${muted};font-size:12px;margin-bottom:16px;">
+        Reference: <b style="color:${ink};">${cert.refNo}</b> &nbsp;•&nbsp; Issued: ${cert.issuedDate}
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;">
+        ${row('Employee', `<b>${cert.employeeName}</b>`, false)}
+        ${row('Department', cert.department, false)}
+        ${row('Leave type', cert.type, false)}
+        ${row('Dates', `<b>${cert.dateRange}</b>`, false)}
+        ${row('Business days', cert.days, false)}
+        ${row('Approved by', cert.approvedBy, false)}
+        ${row('Remaining balance', `<b style="color:${tealDark};">${cert.remainingBalance} day(s)</b> of ${cert.entitlement} entitlement, this leave year`, false)}
+      </table>
+      <p style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:${muted};margin:20px 0 0;line-height:1.5;">
+        This certificate confirms the leave above has been approved in the Phoenix Leave &amp; Attendance Portal.
+        Leave year runs ${cert.leaveYear.start ? fmtDate(cert.leaveYear.start) : ''} – ${cert.leaveYear.end ? fmtDate(cert.leaveYear.end) : ''}; unused days do not carry over.
+      </p>
+    </div>
+    <div style="background:#f8fafc;padding:12px 28px;border-top:1px solid #e2e8f0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:${muted};text-align:center;">
+      Phoenix Leave &amp; Attendance Portal — this is an automated certificate, no signature required.
+    </div>
+  </div>`;
+}
+
 function fmtDate(iso) {
   return new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
 }
@@ -291,6 +366,8 @@ module.exports = {
   isAwaitingApproval,
   isApproverForSomeone,
   overlappingColleagues,
+  buildCertificateData,
+  renderCertificateHtml,
   fmtDate,
   statusLabel,
   nowIso,
