@@ -12,6 +12,7 @@ let calMode = 'year';
 let calMonthIdx = new Date().getMonth();
 let calYear = new Date().getFullYear();
 let pendingEmail = null;
+let dobConfirmed = false;
 let devOtp = null;
 let roster = [];
 let adminDirty = false;
@@ -78,7 +79,13 @@ function renderLogin() {
                                                     </div>
                                                           <div class="otp-demo-note">We'll email you a one-time code — it's free to send and everyone already has a company inbox, so there's nothing to install and no per-message cost.</div>
                                                                 <div id="loginError" style="color:var(--red);font-size:12.5px;margin-bottom:6px;min-height:16px;"></div>
-                                                                      <button class="btn full" onclick="requestOtp()">Email me a code</button>`;
+                                                                      <button class="btn full" onclick="proceedToDob()">Continue</button>`;
+  } else if (!dobConfirmed) {
+    html += `<p>Confirm the date of birth on file for<br><b>${pendingEmail}</b>.</p>
+      <div class="login-field"><label>Date of birth</label><input id="loginDob" type="date"></div>
+      <div id="loginError" style="color:var(--red);font-size:12.5px;margin-bottom:6px;min-height:16px;"></div>
+      <button class="btn full" style="margin-bottom:8px;" onclick="requestOtp()">Continue</button>
+      <button class="btn secondary full" onclick="backToStep1()">‹ Back</button>`;
   } else {
     html += `<p>Enter the 4-digit code sent to<br><b>${pendingEmail}</b>.</p>`;
     if (devOtp) {
@@ -87,18 +94,24 @@ function renderLogin() {
     html += `<div class="login-field"><input id="otpInput" class="otp-input" maxlength="4" inputmode="numeric" placeholder="••••"></div>
       <div id="otpError" style="color:var(--red);font-size:12.5px;margin-bottom:6px;min-height:16px;"></div>
       <button class="btn full" style="margin-bottom:8px;" onclick="verifyOtp()">Verify &amp; sign in</button>
-      <button class="btn secondary full" onclick="backToStep1()">‹ Back</button>`;
+      <button class="btn secondary full" onclick="backToDob()">‹ Back</button>`;
   }
   html += `</div>`;
   document.getElementById('loginScreen').innerHTML = html;
 }
 
-async function requestOtp() {
+function proceedToDob() {
   const email = document.getElementById('loginName').value.trim();
   if (!email) { document.getElementById('loginError').textContent = 'Please select your name.'; return; }
+  pendingEmail = email;
+  renderLogin();
+}
+
+async function requestOtp() {
+  const dob = document.getElementById('loginDob').value;
   try {
-    const result = await api('/auth/request-otp', { method: 'POST', body: { email } });
-    pendingEmail = email;
+    const result = await api('/auth/request-otp', { method: 'POST', body: { email: pendingEmail, dob } });
+    dobConfirmed = true;
     devOtp = result.devCode || null;
     renderLogin();
   } catch (e) {
@@ -120,13 +133,16 @@ async function verifyOtp() {
   }
 }
 
-function backToStep1() { pendingEmail = null; devOtp = null; renderLogin(); }
+function backToStep1() { pendingEmail = null; dobConfirmed = false; devOtp = null; renderLogin(); }
+
+function backToDob() { dobConfirmed = false; devOtp = null; renderLogin(); }
 
 async function logout() {
   if (!confirm('Log out?')) return;
   await api('/auth/logout', { method: 'POST' });
   user = null;
   pendingEmail = null;
+  dobConfirmed = false;
   document.getElementById('app').style.display = 'none';
   renderLogin();
 }
@@ -653,6 +669,7 @@ async function viewAdmin() {
       <div class="form-field"><label>Role</label><select id="newEmpRole"><option value="staff">Staff</option><option value="manager">Manager (approver)</option><option value="director">Admin (Director / CEO)</option></select></div>
       <div class="form-field"><label>Annual entitlement (days)</label><input id="newEmpEnt" type="number" step="0.5" value="15"></div>
       <div class="form-field"><label>Hire date</label><input id="newEmpHire" type="date"></div>
+      <div class="form-field"><label>Date of birth <span class="hint">(used for the login DOB check)</span></label><input id="newEmpDob" type="date"></div>
       <div class="form-field"><label>Contract length (months, optional)</label><input id="newEmpContract" type="number"></div>
     </div><button class="btn" style="margin-top:10px;" onclick="addEmployee()">Add employee</button></div>`;
 
@@ -1069,10 +1086,11 @@ async function addEmployee() {
   const role = document.getElementById('newEmpRole').value;
   const entitlement = document.getElementById('newEmpEnt').value;
   const hireDate = document.getElementById('newEmpHire').value || null;
+  const dob = document.getElementById('newEmpDob').value || null;
   const contractMonths = document.getElementById('newEmpContract').value || null;
   if (!id || !name || !email) { alert('Employee ID, name and email are required.'); return; }
   try {
-    await api('/admin/employees', { method: 'POST', body: { id, name, email, deptId, role, title, entitlement, hireDate, contractMonths } });
+    await api('/admin/employees', { method: 'POST', body: { id, name, email, deptId, role, title, entitlement, hireDate, dob, contractMonths } });
     render();
   } catch (e) {
     alert(e.message || 'Could not add that employee.');
