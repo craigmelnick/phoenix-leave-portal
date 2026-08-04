@@ -14,6 +14,7 @@ let calYear = new Date().getFullYear();
 let pendingEmail = null;
 let devOtp = null;
 let roster = [];
+let adminDirty = false;
 
 /* ---------------- API helper ---------------- */
 
@@ -146,7 +147,7 @@ function renderNav() {
     const el = document.createElement('div');
     el.className = 'nav-item' + (currentView === item.id ? ' active' : '');
     el.innerHTML = `<span class="icon-circle"><img src="/assets/logo-icon.jpg" alt=""></span>${item.label}`;
-    el.onclick = () => { currentView = item.id; render(); };
+    el.onclick = () => navigateTo(item.id);
     nav.appendChild(el);
   });
 }
@@ -158,7 +159,7 @@ function renderBottomNav() {
     const el = document.createElement('div');
     el.className = 'bottom-nav-item' + (currentView === item.id ? ' active' : '');
     el.innerHTML = `<span class="icon-circle"><img src="/assets/logo-icon.jpg" alt=""></span>${item.label}`;
-    el.onclick = () => { currentView = item.id; render(); };
+    el.onclick = () => navigateTo(item.id);
     bar.appendChild(el);
   });
 }
@@ -567,36 +568,39 @@ function approverOptions(options, excludeId, selected) {
 }
 
 async function viewAdmin() {
+  adminDirty = false;
   let html = '';
 
   if (user.role === 'director') {
+    html += `<div class="panel" id="adminSaveBar" style="position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <span style="font-size:13px;color:var(--muted);" id="adminDirtyLabel">All changes saved.</span>
+      <button class="btn" id="adminSaveBtn" onclick="manualSaveAdmin()">Save changes</button>
+    </div>`;
     const { options, employees } = await api('/admin/approvers');
     html += `<div class="panel"><h2>Approver assignments <span class="hint">Only you can set this — who signs off each person's leave</span></h2>
       <p style="font-size:12.5px;color:var(--muted);margin:-4px 0 8px;">Approver 1 must sign off first. Approver 2 (and optional Approver 3, for extra cover if one is off) sign off second — either is enough. Leave Approver 2 blank to send the second step straight to you.</p>
-      <div class="table-scroll"><table><tr><th>Employee</th><th>Approver 1</th><th>Approver 2</th><th>Approver 3 (backup)</th><th></th></tr>`;
+      <div class="table-scroll"><table><tr><th>Employee</th><th>Approver 1</th><th>Approver 2</th><th>Approver 3 (backup)</th></tr>`;
     employees.forEach((e) => {
       html += `<tr>
         <td>${avatarHtml(e.name)}${e.name}</td>
-        <td><select id="app1_${e.id}">${approverOptions(options, e.id, e.approver1)}</select></td>
-        <td><select id="app2_${e.id}">${approverOptions(options, e.id, e.approver2)}</select></td>
-        <td><select id="app3_${e.id}">${approverOptions(options, e.id, e.approver3)}</select></td>
-        <td><button class="btn small" onclick="saveApprovers('${e.id}')">Save</button></td>
+        <td><select id="app1_${e.id}" onchange="markAdminDirty()">${approverOptions(options, e.id, e.approver1)}</select></td>
+        <td><select id="app2_${e.id}" onchange="markAdminDirty()">${approverOptions(options, e.id, e.approver2)}</select></td>
+        <td><select id="app3_${e.id}" onchange="markAdminDirty()">${approverOptions(options, e.id, e.approver3)}</select></td>
       </tr>`;
     });
     html += `</table></div></div>`;
 
     const { employees: allEmp } = await api('/admin/employees');
     html += `<div class="panel"><h2>User roles <span class="hint">Set who has admin (CEO/Director) access vs a regular staff account</span></h2>
-      <div class="table-scroll"><table><tr><th>Employee</th><th>Role</th><th></th></tr>`;
+      <div class="table-scroll"><table><tr><th>Employee</th><th>Role</th></tr>`;
     allEmp.forEach((e) => {
       html += `<tr>
         <td>${avatarHtml(e.name)}${e.name}</td>
-        <td><select id="role_${e.id}">
+        <td><select id="role_${e.id}" onchange="markAdminDirty()">
           <option value="staff" ${e.role === 'staff' ? 'selected' : ''}>Regular user</option>
           <option value="manager" ${e.role === 'manager' ? 'selected' : ''}>Manager (approver)</option>
           <option value="director" ${e.role === 'director' ? 'selected' : ''}>Admin (Director / CEO)</option>
         </select></td>
-        <td><button class="btn small" onclick="saveRole('${e.id}')">Save</button></td>
       </tr>`;
     });
     html += `</table></div></div>`;
@@ -637,14 +641,98 @@ async function viewAdmin() {
     employees.forEach((e) => {
            const since = e.hireDate ? fmtDate(e.hireDate) : '—';
            const contractNote = e.contractMonths ? `<div class="hint">${e.contractMonths}-month contract</div>` : '';
-           html += `<tr><td>${avatarHtml(e.name)}${e.name}</td><td>${e.department}</td><td>${since}${contractNote}</td><td><input type="number" id="ent_${e.id}" value="${e.entitlement}" step="0.5" style="width:70px;"> <button class="btn secondary small" onclick="saveEntitlement('${e.id}')">Save</button></td><td>${e.accrued}</td><td>${e.used}</td><td>${e.pending}</td><td><b style="color:var(--teal-dark)">${e.remaining}</b></td></tr>`;
-       
+           html += `<tr><td>${avatarHtml(e.name)}${e.name}</td><td>${e.department}</td><td>${since}${contractNote}</td><td><input type="number" id="ent_${e.id}" value="${e.entitlement}" step="0.5" style="width:70px;" oninput="markAdminDirty()"></td><td>${e.accrued}</td><td>${e.used}</td><td>${e.pending}</td><td><b style="color:var(--teal-dark)">${e.remaining}</b></td></tr>`;
+
     });
     html += `</table></div></div>`;
   } else {
     html += `<div class="info-box">Individual leave balances are only visible to the CEO and to each employee for their own account — this keeps how much leave a colleague has earned private.</div>`;
   }
   return html;
+}
+
+function markAdminDirty() {
+  adminDirty = true;
+  const label = document.getElementById('adminDirtyLabel');
+  if (label) { label.textContent = 'You have unsaved changes — click Save changes before leaving this screen.'; label.style.color = '#b45309'; }
+}
+
+async function saveAllAdminChanges() {
+  const promises = [];
+  document.querySelectorAll('[id^="app1_"]').forEach((el) => {
+    const id = el.id.replace('app1_', '');
+    const approver1 = document.getElementById('app1_' + id).value || null;
+    const approver2 = document.getElementById('app2_' + id).value || null;
+    const approver3 = document.getElementById('app3_' + id).value || null;
+    promises.push(api(`/admin/approvers/${id}`, { method: 'POST', body: { approver1, approver2, approver3 } }));
+  });
+  document.querySelectorAll('[id^="role_"]').forEach((el) => {
+    const id = el.id.replace('role_', '');
+    promises.push(api(`/admin/employees/${id}`, { method: 'PUT', body: { role: el.value } }));
+  });
+  document.querySelectorAll('[id^="ent_"]').forEach((el) => {
+    const id = el.id.replace('ent_', '');
+    promises.push(api(`/admin/employees/${id}`, { method: 'PUT', body: { entitlement: Number(el.value) } }));
+  });
+  await Promise.all(promises);
+  adminDirty = false;
+}
+
+async function manualSaveAdmin() {
+  const btn = document.getElementById('adminSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    await saveAllAdminChanges();
+    render();
+  } catch (e) {
+    alert('Some changes failed to save: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Save changes'; }
+  }
+}
+
+// Guards navigation away from the Admin screen while there are unsaved edits - the employee data
+// (approvers, roles, entitlements) is sensitive enough that Craig wants an explicit choice every
+// time, rather than changes silently getting lost by clicking to another tab.
+function navigateTo(viewId) {
+  if (currentView === 'admin' && adminDirty) {
+    showLeaveAdminPrompt(viewId);
+    return;
+  }
+  currentView = viewId;
+  render();
+}
+
+function showLeaveAdminPrompt(nextView) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:999;display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:24px 26px;max-width:360px;box-shadow:0 12px 32px rgba(0,0,0,.25);">
+      <h3 style="margin:0 0 8px;font-size:16px;">Save your changes?</h3>
+      <p style="margin:0 0 18px;font-size:13.5px;color:var(--muted);">You've made changes on this screen that haven't been saved yet. Choose what you'd like to do before leaving.</p>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button class="btn secondary" id="lpDiscard">Don't save</button>
+        <button class="btn" id="lpSave">Save changes</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('lpSave').onclick = async () => {
+    document.getElementById('lpSave').textContent = 'Saving…';
+    try {
+      await saveAllAdminChanges();
+    } catch (e) {
+      alert('Some changes failed to save: ' + e.message);
+    }
+    document.body.removeChild(overlay);
+    adminDirty = false;
+    currentView = nextView;
+    render();
+  };
+  document.getElementById('lpDiscard').onclick = () => {
+    document.body.removeChild(overlay);
+    adminDirty = false;
+    currentView = nextView;
+    render();
+  };
 }
 
 async function saveApprovers(userId) {
@@ -732,6 +820,7 @@ function auditActionLabel(action) {
     employee_added: 'Employee added',
     employee_updated: 'Employee record updated',
     approvers_updated: 'Approver chain updated',
+    notification_email_failed: 'Notification email failed to send',
   };
   return map[action] || action;
 }
