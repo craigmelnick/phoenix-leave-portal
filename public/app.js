@@ -14,7 +14,6 @@ let calYear = new Date().getFullYear();
 let pendingEmail = null;
 let dobConfirmed = false;
 let devOtp = null;
-let roster = [];
 let adminDirty = false;
 let profileIncomplete = false;
 
@@ -65,6 +64,37 @@ function statusLabel(s) {
 
 /* ---------------- Login / OTP ---------------- */
 
+/* Date-of-birth picker rendered as scrolling wheels (Day / Month / Year) instead of a
+   calendar. On phones these native <select> controls appear as the familiar spinning
+   wheels; on a computer they show as dropdowns. All three feed a single YYYY-MM-DD value
+   that matches exactly how a date of birth is stored on the employee's record, so the
+   login security check always compares like with like. */
+function dobPickerHtml(prefix) {
+  const thisYear = new Date().getFullYear();
+  let days = '<option value="">Day</option>';
+  for (let d = 1; d <= 31; d++) days += `<option value="${d}">${d}</option>`;
+  let months = '<option value="">Month</option>';
+  MONTH_NAMES.forEach((m, i) => { months += `<option value="${i + 1}">${m}</option>`; });
+  let years = '<option value="">Year</option>';
+  for (let y = thisYear; y >= 1940; y--) years += `<option value="${y}">${y}</option>`;
+  return `<div class="dob-picker">
+      <select id="${prefix}Day" class="dob-wheel" aria-label="Day of birth">${days}</select>
+      <select id="${prefix}Month" class="dob-wheel" aria-label="Month of birth">${months}</select>
+      <select id="${prefix}Year" class="dob-wheel" aria-label="Year of birth">${years}</select>
+    </div>`;
+}
+
+// Reads the three wheels back into a YYYY-MM-DD string, or '' if any part is left blank.
+function readDobPicker(prefix) {
+  const dEl = document.getElementById(prefix + 'Day');
+  const mEl = document.getElementById(prefix + 'Month');
+  const yEl = document.getElementById(prefix + 'Year');
+  if (!dEl || !mEl || !yEl) return '';
+  const d = dEl.value, m = mEl.value, y = yEl.value;
+  if (!d || !m || !y) return '';
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
 function renderLogin() {
   document.getElementById('loginScreen').style.display = 'flex';
   let html = `<div class="login-card">
@@ -72,18 +102,15 @@ function renderLogin() {
     <h2>Phoenix Leave Portal</h2>`;
   if (!pendingEmail) {
     html += `<p>Sign in to manage your leave.</p>
-          <div class="login-field"><label>Your name</label>
-                  <select id="loginName">
-                            <option value="">Select your name…</option>
-                                      ${roster.map((u) => `<option value="${u.email}">${u.name}</option>`).join('')}
-                                              </select>
-                                                    </div>
-                                                          <div class="otp-demo-note">We'll email you a one-time code — it's free to send and everyone already has a company inbox, so there's nothing to install and no per-message cost.</div>
-                                                                <div id="loginError" style="color:var(--red);font-size:12.5px;margin-bottom:6px;min-height:16px;"></div>
-                                                                      <button class="btn full" onclick="proceedToDob()">Continue</button>`;
+      <div class="login-field"><label>Work email address</label>
+        <input id="loginEmail" type="email" autocomplete="username" placeholder="you@phoenixintl.co.za" onkeydown="if(event.key==='Enter'){event.preventDefault();proceedToDob();}">
+      </div>
+      <div class="otp-demo-note">We'll email you a one-time code.</div>
+      <div id="loginError" style="color:var(--red);font-size:12.5px;margin-bottom:6px;min-height:16px;"></div>
+      <button class="btn full" onclick="proceedToDob()">Continue</button>`;
   } else if (!dobConfirmed) {
-    html += `<p>Confirm the date of birth on file for<br><b>${pendingEmail}</b>.</p>
-      <div class="login-field"><label>Date of birth</label><input id="loginDob" type="date"></div>
+    html += `<p>Enter your date of birth to continue signing in as<br><b>${pendingEmail}</b>.</p>
+      <div class="login-field"><label>Date of birth</label>${dobPickerHtml('loginDob')}</div>
       <div id="loginError" style="color:var(--red);font-size:12.5px;margin-bottom:6px;min-height:16px;"></div>
       <button class="btn full" style="margin-bottom:8px;" onclick="requestOtp()">Continue</button>
       <button class="btn secondary full" onclick="backToStep1()">‹ Back</button>`;
@@ -102,14 +129,18 @@ function renderLogin() {
 }
 
 function proceedToDob() {
-  const email = document.getElementById('loginName').value.trim();
-  if (!email) { document.getElementById('loginError').textContent = 'Please select your name.'; return; }
+  const email = document.getElementById('loginEmail').value.trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    document.getElementById('loginError').textContent = 'Please enter your work email address.';
+    return;
+  }
   pendingEmail = email;
   renderLogin();
 }
 
 async function requestOtp() {
-  const dob = document.getElementById('loginDob').value;
+  const dob = readDobPicker('loginDob');
+  if (!dob) { document.getElementById('loginError').textContent = 'Please select your date of birth (day, month and year).'; return; }
   try {
     const result = await api('/auth/request-otp', { method: 'POST', body: { email: pendingEmail, dob } });
     dobConfirmed = true;
@@ -684,7 +715,7 @@ async function viewAdmin() {
       <div class="form-field"><label>Role</label><select id="newEmpRole"><option value="staff">Staff</option><option value="manager">Manager (approver)</option><option value="director">Admin (Director / CEO)</option></select></div>
       <div class="form-field"><label>Annual entitlement (days)</label><input id="newEmpEnt" type="number" step="0.5" value="15"></div>
       <div class="form-field"><label>Hire date</label><input id="newEmpHire" type="date"></div>
-      <div class="form-field"><label>Date of birth <span class="hint">(used for the login DOB check)</span></label><input id="newEmpDob" type="date"></div>
+      <div class="form-field"><label>Date of birth <span class="hint">(used for the login DOB check)</span></label>${dobPickerHtml('newEmpDob')}</div>
       <div class="form-field"><label>Contract length (months, optional)</label><input id="newEmpContract" type="number"></div>
     </div><button class="btn" style="margin-top:10px;" onclick="addEmployee()">Add employee</button></div>`;
 
@@ -1107,7 +1138,7 @@ async function addEmployee() {
   const role = document.getElementById('newEmpRole').value;
   const entitlement = document.getElementById('newEmpEnt').value;
   const hireDate = document.getElementById('newEmpHire').value || null;
-  const dob = document.getElementById('newEmpDob').value || null;
+  const dob = readDobPicker('newEmpDob') || null;
   const contractMonths = document.getElementById('newEmpContract').value || null;
   if (!id || !name || !email) { alert('Employee ID, name and email are required.'); return; }
   try {
@@ -1150,7 +1181,6 @@ async function checkProfileComplete() {
     await checkProfileComplete();
     render();
   } catch (e) {
-try { const r = await api('/auth/roster'); roster = r.users || []; } catch (_) { roster = []; }
-         renderLogin();
+    renderLogin();
   }
 })();

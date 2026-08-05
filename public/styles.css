@@ -138,6 +138,9 @@
   .login-field{text-align:left;margin-bottom:14px;}
   .login-field label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:5px;font-weight:600;}
   .login-field select, .login-field input{width:100%;}
+  .dob-picker{display:flex;gap:8px;}
+  .dob-picker .dob-wheel{flex:1;min-width:0;width:100%;}
+  .form-field .dob-picker{margin-top:2px;}
   .channel-row{display:flex;gap:8px;margin-bottom:6px;}
   .channel-btn{flex:1;padding:9px 4px;border-radius:9px;border:1px solid var(--line);background:#fff;font-size:12px;font-weight:700;cursor:pointer;color:var(--muted);}
   .channel-btn.active{background:var(--teal-light);color:var(--teal-dark);border-color:var(--teal);}
