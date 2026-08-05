@@ -67,14 +67,22 @@ router.post('/request-otp', async (req, res) => {
     return res.json({ ok: true });
   }
 
-  // DOB check (email -> DOB check -> OTP). Only enforced for employees who have a date of birth
-  // on file (see the "dob" column in db.js) - anyone not yet backfilled skips straight to the OTP,
-  // exactly like before this feature existed, so nobody gets locked out of their own account.
+  // Date-of-birth security check (email -> DOB -> OTP). A date of birth is now always required
+  // before a login code is emailed. The first time someone signs in and has no date of birth on
+  // file yet, the one they pick on the scrolling wheels is recorded to their record and becomes
+  // the value every future login is checked against. On later logins it must match exactly — if
+  // it doesn't, we stop here and never send the code.
+  const dob = String(req.body.dob || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) {
+    return res.status(400).json({ error: 'Please select your date of birth.' });
+  }
   if (user.dob) {
-    const dob = String(req.body.dob || '').trim();
-    if (!dob || dob !== user.dob) {
-      return res.status(401).json({ error: 'That date of birth doesn\'t match our records.' });
+    if (dob !== user.dob) {
+      return res.status(401).json({ error: 'Date of birth incorrect.' });
     }
+  } else {
+    db.prepare('UPDATE users SET dob = ? WHERE id = ?').run(dob, user.id);
+    user.dob = dob;
   }
 
   const code = String(crypto.randomInt(1000, 10000));
@@ -165,10 +173,8 @@ router.get('/me', (req, res) => {
 });
 
 
-// Public roster for the sign-in dropdown — names and emails only, no leave data, so it's
-// safe to expose before anyone has signed in.
-router.get('/roster', (req, res) => {
-    const users = db.prepare('SELECT id, name, email FROM users WHERE active=1 ORDER BY name').all();
-    res.json({ users });
-});
+// NOTE: the previous public "/roster" endpoint (which listed every staff member's name and
+// email to anyone who opened the sign-in page) has been removed. Since the portal is linked
+// from the public website, we no longer expose the staff list: people sign in by typing their
+// own work email, which is never confirmed or denied, so outsiders can't harvest the roster.
 module.exports = router;
