@@ -37,12 +37,32 @@ router.get('/details/me', (req, res) => {
 
 router.post('/details/me', (req, res) => {
   const { phone, emergencyContactName, emergencyContactPhone, address } = req.body;
-  db.prepare(
-    'UPDATE users SET phone=?, emergency_contact_name=?, emergency_contact_phone=?, address=? WHERE id=?'
-  ).run(phone || null, emergencyContactName || null, emergencyContactPhone || null, address || null, req.user.id);
-  db.prepare('INSERT INTO audit_log (actor_id, actor_name, action, detail, at) VALUES (?, ?, ?, ?, ?)').run(
-    req.user.id, req.user.name, 'employee_details_updated', `${req.user.name} updated their own contact details`, nowIso()
-  );
+  const before = req.user;
+
+            // Only fields that actually changed get written to the audit log. Saving the form with
+            // nothing edited (or re-saving the same values) creates no log entry at all, and a real
+            // change only names the field(s) that were actually touched, not every field on the form.
+            const candidates = [
+              { label: 'phone number', oldValue: before.phone || null, newValue: phone || null },
+              { label: 'emergency contact name', oldValue: before.emergency_contact_name || null, newValue: emergencyContactName || null },
+              { label: 'emergency contact phone', oldValue: before.emergency_contact_phone || null, newValue: emergencyContactPhone || null },
+              { label: 'address', oldValue: before.address || null, newValue: address || null },
+              ];
+  const changed = candidates.filter((f) => f.oldValue !== f.newValue);
+
+            db.prepare(
+              'UPDATE users SET phone=?, emergency_contact_name=?, emergency_contact_phone=?, address=? WHERE id=?'
+              ).run(phone || null, emergencyContactName || null, emergencyContactPhone || null, address || null, req.user.id);
+
+            if (changed.length) {
+              db.prepare('INSERT INTO audit_log (actor_id, actor_name, action, detail, at) VALUES (?, ?, ?, ?, ?)').run(
+                req.user.id,
+                req.user.name,
+                'employee_details_updated',
+                `${req.user.name} updated their ${changed.map((f) => f.label).join(', ')}`,
+                nowIso()
+                );
+            }
   res.json({ ok: true });
 });
 
@@ -56,10 +76,10 @@ router.post('/details/change-request', (req, res) => {
   const oldValue = req.user[field] || '';
   const info = db.prepare(
     'INSERT INTO detail_change_requests (employee_id, field, field_label, old_value, new_value, status, requested_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).run(req.user.id, field, label, oldValue, String(newValue).trim(), 'pending', nowIso());
+    ).run(req.user.id, field, label, oldValue, String(newValue).trim(), 'pending', nowIso());
   db.prepare('INSERT INTO audit_log (actor_id, actor_name, action, detail, at) VALUES (?, ?, ?, ?, ?)').run(
     req.user.id, req.user.name, 'detail_change_requested', `${req.user.name} requested to change ${label}`, nowIso()
-  );
+    );
   const ceoId = db.prepare(`SELECT id FROM users WHERE role='director' ORDER BY id LIMIT 1`).get()?.id;
   if (ceoId) pushNotification(ceoId, `${req.user.name} has requested to change their ${label.toLowerCase()} - needs your approval.`);
   res.json({ ok: true, id: Number(info.lastInsertRowid) });
@@ -95,13 +115,13 @@ function handleDetailDecision(req, res, action) {
     pushNotification(
       employee.id,
       action === 'approve'
-        ? `Your request to change your ${r.field_label.toLowerCase()} has been approved and updated.`
-        : `Your request to change your ${r.field_label.toLowerCase()} was declined by the CEO.`
-    );
+      ? `Your request to change your ${r.field_label.toLowerCase()} has been approved and updated.`
+      : `Your request to change your ${r.field_label.toLowerCase()} was declined by the CEO.`
+      );
   }
   db.prepare('INSERT INTO audit_log (actor_id, actor_name, action, detail, at) VALUES (?, ?, ?, ?, ?)').run(
     req.user.id, req.user.name, `detail_change_${status}`, `${r.field_label} change for ${employee ? employee.name : r.employee_id}`, nowIso()
-  );
+    );
   res.json({ ok: true, status });
 }
 
